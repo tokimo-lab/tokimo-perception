@@ -1,5 +1,5 @@
 /// Download model files if missing.
-use crate::config::Config;
+use crate::config::AiConfig;
 use std::path::Path;
 
 struct ModelFile {
@@ -8,7 +8,7 @@ struct ModelFile {
     enabled: bool,
 }
 
-pub async fn ensure_models(config: &Config) -> Result<(), String> {
+pub async fn ensure_models(config: &AiConfig) -> Result<(), String> {
     let dir = &config.models_dir;
 
     let files = [
@@ -107,6 +107,26 @@ pub async fn ensure_models(config: &Config) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Check whether all enabled model files exist on disk (no download).
+pub fn all_models_present(config: &AiConfig) -> bool {
+    let dir = &config.models_dir;
+    let checks: Vec<(&str, bool)> = vec![
+        ("clip/vit-b-16.img.fp32.onnx", config.enable_clip),
+        ("clip/vit-b-16.txt.fp32.onnx", config.enable_clip),
+        ("ocr/ch_PP-OCRv4_det_infer.onnx", config.enable_ocr),
+        ("ocr/ch_ppocr_mobile_v2.0_cls_infer.onnx", config.enable_ocr),
+        ("ocr/ch_PP-OCRv4_rec_infer.onnx", config.enable_ocr),
+        ("face/det_10g.onnx", config.enable_face),
+        ("face/w600k_r50.onnx", config.enable_face),
+    ];
+    for (rel, enabled) in checks {
+        if enabled && !Path::new(&format!("{dir}/{rel}")).exists() {
+            return false;
+        }
+    }
+    true
 }
 
 async fn download_file(url: &str, dest: &str) -> Result<(), String> {

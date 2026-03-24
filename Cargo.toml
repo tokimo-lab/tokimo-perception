@@ -1,24 +1,21 @@
 [package]
-name = "tokimo-ai"
+name = "rust-ai"
 version = "0.1.0"
 edition = "2021"
-description = "Unified AI service: OCR + CLIP + Face recognition via ONNX Runtime"
-
-[[bin]]
-name = "tokimo-ai"
-path = "src/main.rs"
+description = "Unified AI service: OCR + CLIP + Face recognition via ONNX Runtime (library)"
 
 [workspace]
 
+[lib]
+name = "rust_ai"
+path = "src/lib.rs"
+
 [dependencies]
-# HTTP
-axum = { version = "0.8", features = ["json", "multipart"] }
-tokio = { version = "1", features = ["full"] }
-tower-http = { version = "0.6", features = ["cors"] }
+# Async
+tokio = { version = "1", features = ["fs", "sync"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 
 # ONNX Runtime
 ort = "2.0.0-rc.9"
@@ -29,20 +26,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 
 # Logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-
-# Config
-dotenvy = "0.15"
 
 # Model download
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
-tokio-util = { version = "0.7", features = ["io"] }
-futures-util = "0.3"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-
-[profile.release]
-opt-level = 3
-lto = true
-strip = "symbols"
-codegen-units = 1
-panic = "abort"

@@ -34,16 +34,19 @@ _registry: dict[str, BaseOcrModel] = {}
 
 
 def _init_registry() -> None:
-    """Populate the model registry based on config flags."""
-    if settings.got_ocr_enabled:
-        model = GotOcrModel()
-        _registry[model.model_id()] = model
-        logger.info("Registered model: %s", model.model_id())
+    """Populate the model registry — always register all known models.
 
-    if settings.pp_chatocr_enabled:
-        model = PpChatOcrModel()
-        _registry[model.model_id()] = model
-        logger.info("Registered model: %s", model.model_id())
+    Models are registered regardless of config flags so the API can always
+    list them.  The enabled flags only control whether they are auto-loaded
+    at startup.
+    """
+    got = GotOcrModel()
+    _registry[got.model_id()] = got
+    logger.info("Registered model: %s", got.model_id())
+
+    chatocr = PpChatOcrModel()
+    _registry[chatocr.model_id()] = chatocr
+    logger.info("Registered model: %s", chatocr.model_id())
 
 
 # ── Lifespan ────────────────────────────────────────────────────

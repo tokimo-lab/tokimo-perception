@@ -1,17 +1,8 @@
 """GOT-OCR 2.0 — Vision-Language OCR model by StepFun AI.
 
-Model: stepfun-ai/GOT-OCR-2.0-hf (Hugging Face Transformers)
+Model: stepfun-ai/GOT-OCR-2.0-hf (Hugging Face Transformers native integration)
 
-Download weights before first use:
-    huggingface-cli download stepfun-ai/GOT-OCR-2.0-hf --local-dir /data/models/got-ocr-2
-
-Or in Python:
-    from transformers import AutoModel, AutoTokenizer
-    AutoTokenizer.from_pretrained("stepfun-ai/GOT-OCR-2.0-hf",
-                                  cache_dir="/data/models/got-ocr-2")
-    AutoModel.from_pretrained("stepfun-ai/GOT-OCR-2.0-hf",
-                              cache_dir="/data/models/got-ocr-2",
-                              trust_remote_code=True)
+Uses AutoProcessor + AutoModelForImageTextToText (GotOcr2ForConditionalGeneration).
 """
 
 from __future__ import annotations
@@ -55,7 +46,6 @@ class GotOcrModel(BaseOcrModel):
 
     def __init__(self) -> None:
         self._model: Any | None = None
-        self._tokenizer: Any | None = None
         self._processor: Any | None = None
         self._device_name: str | None = None
         self._error: str | None = None
@@ -117,7 +107,7 @@ class GotOcrModel(BaseOcrModel):
 
         try:
             import torch
-            from transformers import AutoModel, AutoTokenizer
+            from transformers import AutoModelForImageTextToText, AutoProcessor
         except ImportError as e:
             self._error = f"Missing dependency: {e}. Install torch and transformers."
             self._progress = DownloadProgress(phase="error")
@@ -166,13 +156,14 @@ class GotOcrModel(BaseOcrModel):
                 )
                 monitor_thread.start()
 
-                snapshot_download(
-                    MODEL_HF_ID,
-                    local_dir=str(model_path),
-                )
-
-                stop_monitor.set()
-                monitor_thread.join(timeout=2)
+                try:
+                    snapshot_download(
+                        MODEL_HF_ID,
+                        local_dir=str(model_path),
+                    )
+                finally:
+                    stop_monitor.set()
+                    monitor_thread.join(timeout=2)
 
                 self._progress = DownloadProgress(
                     phase="loading",
@@ -202,12 +193,9 @@ class GotOcrModel(BaseOcrModel):
         source = str(model_path) if model_path.exists() else MODEL_HF_ID
 
         try:
-            self._tokenizer = AutoTokenizer.from_pretrained(
-                source, trust_remote_code=True
-            )
-            self._model = AutoModel.from_pretrained(
+            self._processor = AutoProcessor.from_pretrained(source)
+            self._model = AutoModelForImageTextToText.from_pretrained(
                 source,
-                trust_remote_code=True,
                 torch_dtype=dtype,
                 low_cpu_mem_usage=True,
                 device_map=device if device.startswith("cuda") else None,
@@ -224,7 +212,7 @@ class GotOcrModel(BaseOcrModel):
             self._progress = DownloadProgress(phase="error")
             logger.error(self._error)
             self._model = None
-            self._tokenizer = None
+            self._processor = None
 
     def _monitor_download(
         self, model_path: Path, total_bytes: int, stop: threading.Event
@@ -264,7 +252,7 @@ class GotOcrModel(BaseOcrModel):
 
         try:
             import torch
-            from transformers import AutoModel, AutoTokenizer
+            from transformers import AutoModelForImageTextToText, AutoProcessor
         except ImportError as e:
             self._error = f"Missing dependency: {e}. Install torch and transformers."
             logger.error(self._error)
@@ -286,12 +274,9 @@ class GotOcrModel(BaseOcrModel):
         dtype = torch.float16 if device.startswith("cuda") else torch.float32
 
         try:
-            self._tokenizer = AutoTokenizer.from_pretrained(
-                source, trust_remote_code=True
-            )
-            self._model = AutoModel.from_pretrained(
+            self._processor = AutoProcessor.from_pretrained(source)
+            self._model = AutoModelForImageTextToText.from_pretrained(
                 source,
-                trust_remote_code=True,
                 torch_dtype=dtype,
                 low_cpu_mem_usage=True,
                 device_map=device if device.startswith("cuda") else None,
@@ -307,12 +292,11 @@ class GotOcrModel(BaseOcrModel):
             self._error = f"Failed to load GOT-OCR 2.0: {e}"
             logger.error(self._error)
             self._model = None
-            self._tokenizer = None
+            self._processor = None
             raise RuntimeError(self._error) from e
 
     async def unload(self) -> None:
         self._model = None
-        self._tokenizer = None
         self._processor = None
         self._device_name = None
         self._error = None
@@ -352,14 +336,29 @@ class GotOcrModel(BaseOcrModel):
         return blocks
 
     def _run_inference(self, image: Any) -> str:
-        """Run the GOT-OCR model on a PIL Image."""
+        """Run the GOT-OCR model on a PIL Image using processor + generate."""
+        import torch
+
         try:
-            result = self._model.chat(
-                self._tokenizer,
-                image,
-                ocr_type="ocr",
+            inputs = self._processor(image, return_tensors="pt")
+            # Move inputs to the same device as the model
+            device = next(self._model.parameters()).device
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+
+            with torch.no_grad():
+                generate_ids = self._model.generate(
+                    **inputs,
+                    do_sample=False,
+                    tokenizer=self._processor.tokenizer,
+                    max_new_tokens=4096,
+                    stop_strings="<|im_end|>",
+                )
+            # Strip the input tokens to get only generated text
+            input_len = inputs["input_ids"].shape[1]
+            result = self._processor.decode(
+                generate_ids[0, input_len:], skip_special_tokens=True
             )
-            return result if isinstance(result, str) else str(result)
+            return result
         except Exception as e:
             logger.error("GOT-OCR inference failed: %s", e)
             raise RuntimeError(f"GOT-OCR inference failed: {e}") from e

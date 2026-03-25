@@ -75,6 +75,54 @@ class PpChatOcrModel(BaseOcrModel):
     def load_error(self) -> str | None:
         return self._error
 
+    def start_background_load(self) -> None:
+        """Start model download + load in a background thread."""
+        if self.is_loaded() or self.is_busy():
+            return
+        self._error = None
+        self._progress = DownloadProgress(phase="loading", percent=0)
+        import threading
+
+        thread = threading.Thread(target=self._background_load, daemon=True)
+        thread.start()
+
+    def _background_load(self) -> None:
+        """Run in background thread: load PaddleOCR engine."""
+        try:
+            from paddleocr import PaddleOCR
+        except ImportError as e:
+            self._error = (
+                "paddleocr not installed. "
+                "Install with: pip install paddlepaddle>=2.6 paddleocr>=2.8"
+            )
+            self._progress = DownloadProgress(phase="error")
+            logger.error(self._error)
+            return
+
+        device = settings.resolved_device
+        use_gpu = device.startswith("cuda")
+        model_dir = Path(settings.models_dir) / MODEL_LOCAL_DIR
+
+        try:
+            self._progress = DownloadProgress(phase="loading", percent=50)
+            self._ocr_engine = PaddleOCR(
+                use_angle_cls=True,
+                lang="ch",
+                use_gpu=use_gpu,
+                det_model_dir=str(model_dir / "det") if model_dir.exists() else None,
+                rec_model_dir=str(model_dir / "rec") if model_dir.exists() else None,
+                cls_model_dir=str(model_dir / "cls") if model_dir.exists() else None,
+                show_log=False,
+            )
+            self._device_name = device
+            self._progress = DownloadProgress(phase="complete", percent=100)
+            logger.info("PP-ChatOCRv3 loaded (use_gpu=%s)", use_gpu)
+        except Exception as e:
+            self._error = f"Failed to load PP-ChatOCRv3: {e}"
+            self._progress = DownloadProgress(phase="error")
+            logger.error(self._error)
+            self._ocr_engine = None
+
     async def load(self) -> None:
         self._error = None
 

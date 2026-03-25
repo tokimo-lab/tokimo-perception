@@ -23,8 +23,8 @@ paddle = [
 [project.scripts]
 serve = "uvicorn app.main:app --host 0.0.0.0 --port 5679"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "ruff>=0.8",
     "pytest>=8.0",
 ]

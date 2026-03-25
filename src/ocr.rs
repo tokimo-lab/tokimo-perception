@@ -196,6 +196,23 @@ impl OcrService {
         img: &DynamicImage,
         bbox: &TextBox,
     ) -> Result<Option<OcrItem>, String> {
+        // Detect dark background: convert to grayscale first, then invert.
+        // Using grayscale avoids color inversion artifacts (e.g. green terminal text
+        // becoming magenta) that confuse the recognition model.
+        let img = {
+            let gray = img.to_luma8();
+            let (gw, gh) = gray.dimensions();
+            let total: f64 = gray.pixels().map(|p| p.0[0] as f64).sum();
+            let avg_lum = total / (gw as f64 * gh as f64);
+            if avg_lum < 127.0 {
+                let mut gray = gray;
+                image::imageops::invert(&mut gray);
+                DynamicImage::ImageLuma8(gray)
+            } else {
+                img.clone()
+            }
+        };
+
         let (w, h) = (img.width(), img.height());
         let target_h = 48u32;
         let target_w = ((w as f32 / h as f32) * target_h as f32).max(1.0) as u32;
@@ -204,9 +221,7 @@ impl OcrService {
         let resized =
             img.resize_exact(target_w, target_h, image::imageops::FilterType::CatmullRom);
 
-        // Sharpen to improve character edge clarity (helps distinguish g/a, 0/O, etc.)
-        let sharpened = resized.unsharpen(1.0, 2);
-        let rgb = sharpened.to_rgb8();
+        let rgb = resized.to_rgb8();
 
         let mean = [0.5f32, 0.5, 0.5];
         let std = [0.5f32, 0.5, 0.5];

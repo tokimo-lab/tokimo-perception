@@ -2,7 +2,7 @@
 name = "tokimo-python-ocr"
 version = "0.1.0"
 description = "VLM-based OCR sidecar service for Tokimo"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -17,8 +17,8 @@ dependencies = [
 
 [project.optional-dependencies]
 paddle = [
-    "paddlepaddle>=2.6",
-    "paddleocr>=2.8",
+    "paddlepaddle-gpu>=3.0",
+    "paddleocr>=3.0",
 ]
 
 [project.scripts]
@@ -28,4 +28,17 @@ serve = "uvicorn app.main:app --host 0.0.0.0 --port 5679"
 dev = [
     "ruff>=0.8",
     "pytest>=8.0",
+]
+
+[[tool.uv.index]]
+name = "paddlepaddle"
+url = "https://www.paddlepaddle.org.cn/packages/stable/cu126/"
+explicit = true
+
+[tool.uv.sources]
+paddlepaddle-gpu = { index = "paddlepaddle" }
+
+[tool.uv]
+override-dependencies = [
+    "nvidia-nccl-cu12>=2.28",
 ]

@@ -39,6 +39,17 @@ pub async fn ensure_models(config: &AiConfig) -> Result<(), String> {
             url: "https://github.com/tokimo-lab/tokimo-ai-models/releases/download/v0.3.0/PP-OCRv5_server_rec.onnx",
             enabled: config.enable_ocr,
         },
+        // OCR models — PP-OCRv5 mobile (lightweight variant)
+        ModelFile {
+            rel_path: "ocr/PP-OCRv5_mobile_det.onnx",
+            url: "https://github.com/tokimo-lab/tokimo-ai-models/releases/download/v0.3.0/PP-OCRv5_mobile_det.onnx",
+            enabled: config.enable_ocr,
+        },
+        ModelFile {
+            rel_path: "ocr/PP-OCRv5_mobile_rec.onnx",
+            url: "https://github.com/tokimo-lab/tokimo-ai-models/releases/download/v0.3.0/PP-OCRv5_mobile_rec.onnx",
+            enabled: config.enable_ocr,
+        },
         // Face models (InsightFace buffalo_l pack, publicly accessible)
         ModelFile {
             rel_path: "face/det_10g.onnx",
@@ -114,8 +125,12 @@ pub fn all_models_present(config: &AiConfig) -> bool {
     let checks: Vec<(&str, bool)> = vec![
         ("clip/vit-b-16.img.fp32.onnx", config.enable_clip),
         ("clip/vit-b-16.txt.fp32.onnx", config.enable_clip),
-        ("ocr/PP-OCRv5_mobile_det.onnx", config.enable_ocr),
+        // Server variant
+        ("ocr/PP-OCRv5_server_det.onnx", config.enable_ocr),
         ("ocr/PP-OCRv5_cls.onnx", config.enable_ocr),
+        ("ocr/PP-OCRv5_server_rec.onnx", config.enable_ocr),
+        // Mobile variant
+        ("ocr/PP-OCRv5_mobile_det.onnx", config.enable_ocr),
         ("ocr/PP-OCRv5_mobile_rec.onnx", config.enable_ocr),
         ("face/det_10g.onnx", config.enable_face),
         ("face/w600k_r50.onnx", config.enable_face),

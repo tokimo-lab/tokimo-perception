@@ -8,6 +8,8 @@ pub mod config;
 pub mod face;
 pub mod models;
 pub mod ocr;
+pub mod ocr_backend;
+pub mod ocr_manager;
 mod tokenizer;
 
 use std::sync::Arc;
@@ -21,7 +23,7 @@ use tokio::sync::OnceCell;
 pub struct AiService {
     config: AiConfig,
     clip: OnceCell<clip::ClipService>,
-    ocr: OnceCell<ocr::OcrService>,
+    ocr_manager: OnceCell<ocr_manager::OcrManager>,
     face: OnceCell<face::FaceService>,
 }
 
@@ -30,7 +32,7 @@ impl AiService {
         Arc::new(Self {
             config,
             clip: OnceCell::new(),
-            ocr: OnceCell::new(),
+            ocr_manager: OnceCell::new(),
             face: OnceCell::new(),
         })
     }
@@ -72,19 +74,36 @@ impl AiService {
     // ── OCR ──────────────────────────────────────────────────────────────
 
     /// Run OCR on raw image bytes. Returns detected text regions.
-    pub async fn ocr(&self, image_bytes: &[u8]) -> Result<Vec<ocr::OcrItem>, String> {
+    ///
+    /// `model_name` selects the backend (e.g. `"pp-ocrv5-server"`).
+    /// Pass `None` to use the default server model.
+    pub async fn ocr(
+        &self,
+        image_bytes: &[u8],
+        model_name: Option<&str>,
+    ) -> Result<Vec<ocr::OcrItem>, String> {
         if !self.config.enable_ocr {
             return Err("OCR is disabled".into());
         }
-        let img = image::load_from_memory(image_bytes)
-            .map_err(|e| format!("Invalid image: {e}"))?;
-        let svc = self
-            .ocr
+        let manager = self
+            .ocr_manager
             .get_or_try_init(|| async {
-                ocr::OcrService::new(&self.config.models_dir)
+                Ok::<_, String>(ocr_manager::OcrManager::new(
+                    self.config.models_dir.clone(),
+                    self.config.ocr_sidecar_url.clone(),
+                ))
             })
             .await?;
-        svc.recognize(&img)
+        let model = model_name.unwrap_or(ocr_manager::DEFAULT_MODEL);
+        manager.ocr(model, image_bytes).await
+    }
+
+    /// List available OCR models and their status.
+    pub async fn ocr_available_models(&self) -> Vec<ocr_manager::OcrModelInfo> {
+        match self.ocr_manager.get() {
+            Some(mgr) => mgr.available_models(),
+            None => vec![],
+        }
     }
 
     // ── CLIP ─────────────────────────────────────────────────────────────

@@ -1,11 +1,13 @@
 /// PaddleOCR pipeline in Rust: detection → classification → recognition.
-/// Uses three ONNX models via ort.
+/// Uses three ONNX models via ort. Supports both Mobile and Server variants.
 use std::path::Path;
 use std::sync::Mutex;
 
 use image::{DynamicImage, GrayImage, Luma};
 use ndarray::Array4;
 use ort::{session::Session, value::Tensor};
+
+use crate::ocr_backend::{OcrBackend, PaddleOcrVariant};
 
 static OCR_KEYS: &str = include_str!("../data/ppocr_keys_v5.txt");
 
@@ -25,13 +27,27 @@ pub struct OcrService {
     cls_session: Mutex<Session>,
     rec_session: Mutex<Session>,
     char_dict: Vec<String>,
+    variant_name: String,
 }
 
 impl OcrService {
-    pub fn new(models_dir: &str) -> Result<Self, String> {
-        let det_path = format!("{}/ocr/PP-OCRv5_server_det.onnx", models_dir);
+    pub fn new(models_dir: &str, variant: PaddleOcrVariant) -> Result<Self, String> {
+        let (det_name, rec_name, variant_name) = match variant {
+            PaddleOcrVariant::Mobile => (
+                "PP-OCRv5_mobile_det.onnx",
+                "PP-OCRv5_mobile_rec.onnx",
+                "pp-ocrv5-mobile",
+            ),
+            PaddleOcrVariant::Server => (
+                "PP-OCRv5_server_det.onnx",
+                "PP-OCRv5_server_rec.onnx",
+                "pp-ocrv5-server",
+            ),
+        };
+
+        let det_path = format!("{}/ocr/{det_name}", models_dir);
         let cls_path = format!("{}/ocr/PP-OCRv5_cls.onnx", models_dir);
-        let rec_path = format!("{}/ocr/PP-OCRv5_server_rec.onnx", models_dir);
+        let rec_path = format!("{}/ocr/{rec_name}", models_dir);
 
         for p in [&det_path, &cls_path, &rec_path] {
             if !Path::new(p).exists() {
@@ -39,11 +55,11 @@ impl OcrService {
             }
         }
 
-        tracing::info!("Loading OCR detection model...");
+        tracing::info!("Loading OCR {variant_name} detection model...");
         let det_session = load_session(&det_path)?;
         tracing::info!("Loading OCR classification model...");
         let cls_session = load_session(&cls_path)?;
-        tracing::info!("Loading OCR recognition model...");
+        tracing::info!("Loading OCR {variant_name} recognition model...");
         let rec_session = load_session(&rec_path)?;
 
         // Build character dictionary: blank + keys + space
@@ -56,16 +72,20 @@ impl OcrService {
         }
         char_dict.push(" ".to_string());
 
-        tracing::info!("OCR service ready ({} characters).", char_dict.len());
+        tracing::info!(
+            "OCR service ready: {variant_name} ({} characters).",
+            char_dict.len()
+        );
         Ok(Self {
             det_session: Mutex::new(det_session),
             cls_session: Mutex::new(cls_session),
             rec_session: Mutex::new(rec_session),
             char_dict,
+            variant_name: variant_name.to_string(),
         })
     }
 
-    pub fn recognize(&self, img: &DynamicImage) -> Result<Vec<OcrItem>, String> {
+    fn recognize_impl(&self, img: &DynamicImage) -> Result<Vec<OcrItem>, String> {
         let (orig_w, orig_h) = (img.width(), img.height());
         if orig_w > 10000 || orig_h > 10000 {
             return Err("Image too large".into());
@@ -301,6 +321,16 @@ impl OcrService {
             h: bbox.h,
             paragraph_id: 0, // assigned later by clustering
         }))
+    }
+}
+
+impl OcrBackend for OcrService {
+    fn name(&self) -> &str {
+        &self.variant_name
+    }
+
+    fn recognize(&self, img: &DynamicImage) -> Result<Vec<OcrItem>, String> {
+        self.recognize_impl(img)
     }
 }
 

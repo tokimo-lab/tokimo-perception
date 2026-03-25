@@ -23,20 +23,20 @@ pub async fn ensure_models(config: &AiConfig) -> Result<(), String> {
             url: "https://github.com/MT-Photos/mt-photos-ai/releases/download/v1.1.0/vit-b-16.txt.fp32.onnx",
             enabled: config.enable_clip,
         },
-        // OCR models — PP-OCRv5 mobile (ONNX converted from PaddleOCR)
+        // OCR models — PP-OCRv5 server (ONNX converted from PaddleOCR)
         ModelFile {
-            rel_path: "ocr/PP-OCRv5_mobile_det.onnx",
-            url: "https://github.com/tokimo-lab/tokimo-ai-models/releases/download/v0.2.0/PP-OCRv5_mobile_det.onnx",
+            rel_path: "ocr/PP-OCRv5_server_det.onnx",
+            url: "https://github.com/tokimo-lab/tokimo-ai-models/releases/download/v0.3.0/PP-OCRv5_server_det.onnx",
             enabled: config.enable_ocr,
         },
         ModelFile {
             rel_path: "ocr/PP-OCRv5_cls.onnx",
-            url: "https://github.com/tokimo-lab/tokimo-ai-models/releases/download/v0.2.0/PP-OCRv5_cls.onnx",
+            url: "https://github.com/tokimo-lab/tokimo-ai-models/releases/download/v0.3.0/PP-OCRv5_cls.onnx",
             enabled: config.enable_ocr,
         },
         ModelFile {
-            rel_path: "ocr/PP-OCRv5_mobile_rec.onnx",
-            url: "https://github.com/tokimo-lab/tokimo-ai-models/releases/download/v0.2.0/PP-OCRv5_mobile_rec.onnx",
+            rel_path: "ocr/PP-OCRv5_server_rec.onnx",
+            url: "https://github.com/tokimo-lab/tokimo-ai-models/releases/download/v0.3.0/PP-OCRv5_server_rec.onnx",
             enabled: config.enable_ocr,
         },
         // Face models (InsightFace buffalo_l pack, publicly accessible)

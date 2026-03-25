@@ -29,9 +29,9 @@ pub struct OcrService {
 
 impl OcrService {
     pub fn new(models_dir: &str) -> Result<Self, String> {
-        let det_path = format!("{}/ocr/PP-OCRv5_mobile_det.onnx", models_dir);
+        let det_path = format!("{}/ocr/PP-OCRv5_server_det.onnx", models_dir);
         let cls_path = format!("{}/ocr/PP-OCRv5_cls.onnx", models_dir);
-        let rec_path = format!("{}/ocr/PP-OCRv5_mobile_rec.onnx", models_dir);
+        let rec_path = format!("{}/ocr/PP-OCRv5_server_rec.onnx", models_dir);
 
         for p in [&det_path, &cls_path, &rec_path] {
             if !Path::new(p).exists() {

@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
+use base64::Engine;
 use image::DynamicImage;
+use serde::Deserialize;
 use tokio::sync::OnceCell;
 
 use crate::ocr::OcrItem;
@@ -35,8 +37,7 @@ impl OcrManager {
         let mut backends: HashMap<&'static str, OnceCell<Box<dyn OcrBackend>>> = HashMap::new();
         backends.insert(MODEL_PP_OCRV5_MOBILE, OnceCell::new());
         backends.insert(MODEL_PP_OCRV5_SERVER, OnceCell::new());
-        backends.insert(MODEL_GOT_OCR_2, OnceCell::new());
-        backends.insert(MODEL_PP_CHATOCR_V3, OnceCell::new());
+        // VLM models (GOT-OCR-2, PP-ChatOCR-v3) are handled via HTTP sidecar, not backends
         Self {
             models_dir,
             backends,
@@ -45,7 +46,19 @@ impl OcrManager {
     }
 
     /// Run OCR with the given model. Lazy-initializes the backend on first call.
+    /// For VLM sidecar models, makes an HTTP call to the Python sidecar.
     pub async fn ocr(&self, model_name: &str, image_bytes: &[u8]) -> Result<Vec<OcrItem>, String> {
+        // VLM models: call sidecar HTTP endpoint directly (async)
+        if matches!(model_name, MODEL_GOT_OCR_2 | MODEL_PP_CHATOCR_V3) {
+            let sidecar_url = self.sidecar_url.as_deref().ok_or_else(|| {
+                format!(
+                    "VLM OCR backend '{model_name}' requires OCR_SIDECAR_URL to be configured"
+                )
+            })?;
+            return vlm_ocr_via_sidecar(sidecar_url, model_name, image_bytes).await;
+        }
+
+        // Local Paddle models: use sync backend trait
         let img =
             image::load_from_memory(image_bytes).map_err(|e| format!("Invalid image: {e}"))?;
         let backend = self.get_or_init_backend(model_name).await?;
@@ -112,47 +125,81 @@ impl OcrManager {
                     crate::ocr::OcrService::new(&self.models_dir, PaddleOcrVariant::Server)?;
                 Ok(Box::new(svc))
             }
-            MODEL_GOT_OCR_2 | MODEL_PP_CHATOCR_V3 => {
-                let backend = VlmOcrBackend::new(model_name, self.sidecar_url.clone())?;
-                Ok(Box::new(backend))
-            }
             _ => Err(format!("Unknown OCR model: {model_name}")),
         }
     }
 }
 
-// ── VLM sidecar stub ─────────────────────────────────────────────────────────
+// ── VLM sidecar HTTP call ─────────────────────────────────────────────────────
 
-/// Placeholder for VLM-based OCR backends (GOT-OCR-2, PP-ChatOCR-v3) that run
-/// in a Python sidecar. Returns an error until the sidecar integration is wired.
-struct VlmOcrBackend {
-    model_name: String,
-    _sidecar_url: Option<String>,
+/// Response block from the Python sidecar `/ocr` endpoint.
+#[derive(Debug, Deserialize)]
+struct SidecarOcrBlock {
+    text: String,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    score: f64,
+    #[serde(default)]
+    paragraph_id: u32,
 }
 
-impl VlmOcrBackend {
-    fn new(model_name: &str, sidecar_url: Option<String>) -> Result<Self, String> {
-        if sidecar_url.is_none() {
-            return Err(format!(
-                "VLM OCR backend '{model_name}' requires a sidecar URL (ocr_sidecar_url not configured)"
-            ));
-        }
-        Ok(Self {
-            model_name: model_name.to_string(),
-            _sidecar_url: sidecar_url,
+/// Response from the Python sidecar `/ocr` endpoint.
+#[derive(Debug, Deserialize)]
+struct SidecarOcrResponse {
+    #[allow(dead_code)]
+    model: String,
+    blocks: Vec<SidecarOcrBlock>,
+    #[allow(dead_code)]
+    processing_time_ms: f64,
+}
+
+/// Call the Python OCR sidecar via HTTP to run VLM-based OCR.
+async fn vlm_ocr_via_sidecar(
+    sidecar_url: &str,
+    model_name: &str,
+    image_bytes: &[u8],
+) -> Result<Vec<OcrItem>, String> {
+    let b64 = base64::engine::general_purpose::STANDARD.encode(image_bytes);
+    let body = serde_json::json!({
+        "model": model_name,
+        "image": b64,
+    });
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/ocr", sidecar_url.trim_end_matches('/'));
+
+    let resp = client
+        .post(&url)
+        .json(&body)
+        .timeout(std::time::Duration::from_secs(120))
+        .send()
+        .await
+        .map_err(|e| format!("Sidecar HTTP error: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("Sidecar returned {status}: {text}"));
+    }
+
+    let result: SidecarOcrResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse sidecar response: {e}"))?;
+
+    Ok(result
+        .blocks
+        .into_iter()
+        .map(|b| OcrItem {
+            text: b.text,
+            score: b.score as f32,
+            x: b.x as f32,
+            y: b.y as f32,
+            w: b.w as f32,
+            h: b.h as f32,
+            paragraph_id: b.paragraph_id,
         })
-    }
-}
-
-impl OcrBackend for VlmOcrBackend {
-    fn name(&self) -> &str {
-        &self.model_name
-    }
-
-    fn recognize(&self, _img: &DynamicImage) -> Result<Vec<OcrItem>, String> {
-        Err(format!(
-            "VLM OCR backend '{}' is not yet implemented — sidecar not connected",
-            self.model_name
-        ))
-    }
+        .collect())
 }

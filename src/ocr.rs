@@ -7,7 +7,7 @@ use image::{DynamicImage, GrayImage, Luma};
 use ndarray::Array4;
 use ort::{session::Session, value::Tensor};
 
-static OCR_KEYS: &str = include_str!("../data/ppocr_keys_v1.txt");
+static OCR_KEYS: &str = include_str!("../data/ppocr_keys_v5.txt");
 
 pub struct OcrItem {
     pub text: String,
@@ -16,6 +16,8 @@ pub struct OcrItem {
     pub y: f32,
     pub w: f32,
     pub h: f32,
+    /// Paragraph group index assigned by spatial clustering.
+    pub paragraph_id: u32,
 }
 
 pub struct OcrService {
@@ -27,9 +29,9 @@ pub struct OcrService {
 
 impl OcrService {
     pub fn new(models_dir: &str) -> Result<Self, String> {
-        let det_path = format!("{}/ocr/ch_PP-OCRv4_det_infer.onnx", models_dir);
-        let cls_path = format!("{}/ocr/ch_ppocr_mobile_v2.0_cls_infer.onnx", models_dir);
-        let rec_path = format!("{}/ocr/ch_PP-OCRv4_rec_infer.onnx", models_dir);
+        let det_path = format!("{}/ocr/PP-OCRv5_mobile_det.onnx", models_dir);
+        let cls_path = format!("{}/ocr/PP-OCRv5_cls.onnx", models_dir);
+        let rec_path = format!("{}/ocr/PP-OCRv5_mobile_rec.onnx", models_dir);
 
         for p in [&det_path, &cls_path, &rec_path] {
             if !Path::new(p).exists() {
@@ -91,6 +93,9 @@ impl OcrService {
                 results.push(item);
             }
         }
+
+        // Step 4: Assign paragraph IDs via spatial clustering
+        assign_paragraph_ids(&mut results);
 
         Ok(results)
     }
@@ -276,6 +281,7 @@ impl OcrService {
             y: bbox.y,
             w: bbox.w,
             h: bbox.h,
+            paragraph_id: 0, // assigned later by clustering
         }))
     }
 }
@@ -460,4 +466,95 @@ fn load_session(path: &str) -> Result<Session, String> {
         .map_err(|e| format!("Session builder: {e}"))?
         .commit_from_file(path)
         .map_err(|e| format!("Load model {path}: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// Paragraph clustering — groups OCR lines into paragraphs by spatial proximity
+// ---------------------------------------------------------------------------
+
+/// Assign `paragraph_id` to each OcrItem by clustering lines that belong
+/// to the same text column/paragraph. Two lines merge when:
+///   1. Their X ranges overlap sufficiently (>50% of the narrower line)
+///   2. The vertical gap between them is ≤ 1.5× the average line height
+fn assign_paragraph_ids(items: &mut [OcrItem]) {
+    if items.is_empty() {
+        return;
+    }
+
+    // Sort by Y (top-to-bottom), then X (left-to-right) for stable ordering
+    items.sort_by(|a, b| {
+        let y_cmp = a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal);
+        if y_cmp == std::cmp::Ordering::Equal {
+            a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal)
+        } else {
+            y_cmp
+        }
+    });
+
+    // Union-Find for clustering
+    let n = items.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+
+    fn find(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]]; // path compression
+            i = parent[i];
+        }
+        i
+    }
+
+    fn union(parent: &mut [usize], a: usize, b: usize) {
+        let ra = find(parent, a);
+        let rb = find(parent, b);
+        if ra != rb {
+            parent[rb] = ra;
+        }
+    }
+
+    // For each pair of items, check if they should be in the same paragraph
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let a = &items[i];
+            let b = &items[j];
+
+            // X-range overlap check
+            let a_left = a.x;
+            let a_right = a.x + a.w;
+            let b_left = b.x;
+            let b_right = b.x + b.w;
+
+            let overlap_start = a_left.max(b_left);
+            let overlap_end = a_right.min(b_right);
+            let overlap = (overlap_end - overlap_start).max(0.0);
+
+            let min_width = a.w.min(b.w);
+            if min_width <= 0.0 || overlap / min_width < 0.5 {
+                continue; // not enough X overlap — different columns
+            }
+
+            // Vertical gap check: gap ≤ 1.5× average line height
+            let a_bottom = a.y + a.h;
+            let b_top = b.y;
+            let gap = (b_top - a_bottom).max(0.0);
+            let avg_h = (a.h + b.h) / 2.0;
+
+            if gap <= avg_h * 1.5 {
+                union(&mut parent, i, j);
+            }
+        }
+    }
+
+    // Assign sequential paragraph IDs from root indices
+    let mut root_to_id: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
+    let mut next_id = 0u32;
+
+    for i in 0..n {
+        let root = find(&mut parent, i);
+        let id = root_to_id.entry(root).or_insert_with(|| {
+            let id = next_id;
+            next_id += 1;
+            id
+        });
+        items[i].paragraph_id = *id;
+    }
 }

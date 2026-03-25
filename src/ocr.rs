@@ -49,10 +49,10 @@ impl OcrService {
         // Build character dictionary: blank + keys + space
         let mut char_dict = vec!["".to_string()]; // index 0 = CTC blank
         for line in OCR_KEYS.lines() {
-            let ch = line.trim();
-            if !ch.is_empty() {
-                char_dict.push(ch.to_string());
-            }
+            // Only strip line endings — do NOT use trim() which removes
+            // Unicode whitespace like U+3000 (Ideographic Space) present
+            // in the PP-OCRv5 dictionary, causing index shift.
+            char_dict.push(line.to_string());
         }
         char_dict.push(" ".to_string());
 

@@ -104,8 +104,8 @@ impl OcrService {
     fn detect(&self, img: &DynamicImage) -> Result<Vec<TextBox>, String> {
         let (orig_w, orig_h) = (img.width() as f32, img.height() as f32);
 
-        // Resize: limit longest side to 960, keep aspect ratio, pad to multiple of 32
-        let max_side = 960.0f32;
+        // Resize: limit longest side to 1440, keep aspect ratio, pad to multiple of 32
+        let max_side = 1440.0f32;
         let scale = (max_side / orig_w.max(orig_h)).min(1.0);
         let new_w = ((orig_w * scale) as u32).max(32);
         let new_h = ((orig_h * scale) as u32).max(32);
@@ -203,7 +203,10 @@ impl OcrService {
 
         let resized =
             img.resize_exact(target_w, target_h, image::imageops::FilterType::CatmullRom);
-        let rgb = resized.to_rgb8();
+
+        // Sharpen to improve character edge clarity (helps distinguish g/a, 0/O, etc.)
+        let sharpened = resized.unsharpen(1.0, 2);
+        let rgb = sharpened.to_rgb8();
 
         let mean = [0.5f32, 0.5, 0.5];
         let std = [0.5f32, 0.5, 0.5];

@@ -39,7 +39,7 @@ Or let the service auto-download from Hugging Face on first request (requires in
 Requires PaddlePaddle dependencies (not installed by default):
 
 ```bash
-pip install paddlepaddle>=2.6 paddleocr>=2.8
+uv sync --extra paddle
 ```
 
 Enable via environment variable: `PP_CHATOCR_ENABLED=true`
@@ -98,8 +98,9 @@ docker compose up --build
 
 ```bash
 cd packages/python-ocr
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 5679 --reload
+uv sync                  # Install dependencies
+uv run uvicorn app.main:app --host 0.0.0.0 --port 5679 --reload
+
+# With PP-ChatOCRv3 support:
+uv sync --extra paddle
 ```

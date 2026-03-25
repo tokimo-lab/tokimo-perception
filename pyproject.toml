@@ -20,6 +20,11 @@ paddle = [
     "paddleocr>=2.8",
 ]
 
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.backends._legacy:_Backend"
+[project.scripts]
+serve = "uvicorn app.main:app --host 0.0.0.0 --port 5679"
+
+[tool.uv]
+dev-dependencies = [
+    "ruff>=0.8",
+    "pytest>=8.0",
+]

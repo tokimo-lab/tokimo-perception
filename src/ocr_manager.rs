@@ -136,10 +136,10 @@ impl OcrManager {
 #[derive(Debug, Deserialize)]
 struct SidecarOcrBlock {
     text: String,
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
+    x: Option<f64>,
+    y: Option<f64>,
+    w: Option<f64>,
+    h: Option<f64>,
     score: f64,
     #[serde(default)]
     paragraph_id: u32,
@@ -195,10 +195,12 @@ async fn vlm_ocr_via_sidecar(
         .map(|b| OcrItem {
             text: b.text,
             score: b.score as f32,
-            x: b.x as f32,
-            y: b.y as f32,
-            w: b.w as f32,
-            h: b.h as f32,
+            // Use -1.0 sentinel when sidecar returns null coordinates
+            // (e.g. GOT-OCR which doesn't provide bounding boxes)
+            x: b.x.map(|v| v as f32).unwrap_or(-1.0),
+            y: b.y.map(|v| v as f32).unwrap_or(-1.0),
+            w: b.w.map(|v| v as f32).unwrap_or(-1.0),
+            h: b.h.map(|v| v as f32).unwrap_or(-1.0),
             paragraph_id: b.paragraph_id,
         })
         .collect())

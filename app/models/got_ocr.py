@@ -366,7 +366,7 @@ class GotOcrModel(BaseOcrModel):
     def _parse_output(
         self, raw_text: str, img_w: int, img_h: int
     ) -> list[OcrBlock]:
-        """Parse GOT-OCR output into normalized OcrBlock list."""
+        """Parse GOT-OCR output into pixel-coordinate OcrBlock list."""
         blocks: list[OcrBlock] = []
         box_pattern = re.compile(
             r"\((\d+),(\d+)\),\((\d+),(\d+)\)\s*(.*)"
@@ -380,10 +380,10 @@ class GotOcrModel(BaseOcrModel):
 
             match = box_pattern.search(line)
             if match and img_w > 0 and img_h > 0:
-                x1 = int(match.group(1)) / img_w
-                y1 = int(match.group(2)) / img_h
-                x2 = int(match.group(3)) / img_w
-                y2 = int(match.group(4)) / img_h
+                x1 = float(int(match.group(1)))
+                y1 = float(int(match.group(2)))
+                x2 = float(int(match.group(3)))
+                y2 = float(int(match.group(4)))
                 text = match.group(5).strip() or line
                 blocks.append(
                     OcrBlock(
@@ -397,13 +397,14 @@ class GotOcrModel(BaseOcrModel):
                     )
                 )
             else:
+                # No bounding box — use full image as fallback
                 blocks.append(
                     OcrBlock(
                         text=line,
                         x=0.0,
                         y=0.0,
-                        w=1.0,
-                        h=1.0,
+                        w=float(img_w),
+                        h=float(img_h),
                         score=0.8,
                         paragraph_id=idx,
                     )

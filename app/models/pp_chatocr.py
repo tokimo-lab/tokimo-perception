@@ -231,7 +231,7 @@ class PpChatOcrModel(BaseOcrModel):
     def _parse_result(
         self, results: list[Any], img_w: int, img_h: int
     ) -> list[OcrBlock]:
-        """Parse PaddleOCR v3 OCRResult into normalized OcrBlock list.
+        """Parse PaddleOCR v3 OCRResult into pixel-coordinate OcrBlock list.
 
         PaddleOCR v3 returns a list of OCRResult objects.
         Each has .json['res'] with:
@@ -275,10 +275,10 @@ class PpChatOcrModel(BaseOcrModel):
                 blocks.append(
                     OcrBlock(
                         text=text,
-                        x=x_min / img_w,
-                        y=y_min / img_h,
-                        w=(x_max - x_min) / img_w,
-                        h=(y_max - y_min) / img_h,
+                        x=float(x_min),
+                        y=float(y_min),
+                        w=float(x_max - x_min),
+                        h=float(y_max - y_min),
                         score=score,
                         paragraph_id=page_idx,
                     )

@@ -336,11 +336,14 @@ class GotOcrModel(BaseOcrModel):
         return blocks
 
     def _run_inference(self, image: Any) -> str:
-        """Run the GOT-OCR model on a PIL Image using processor + generate."""
+        """Run the GOT-OCR model on a PIL Image using processor + generate.
+
+        Uses format=True for structured output with line breaks.
+        """
         import torch
 
         try:
-            inputs = self._processor(image, return_tensors="pt")
+            inputs = self._processor(image, return_tensors="pt", format=True)
             # Move inputs to the same device as the model
             device = next(self._model.parameters()).device
             inputs = {k: v.to(device) for k, v in inputs.items()}
@@ -366,16 +369,23 @@ class GotOcrModel(BaseOcrModel):
     def _parse_output(
         self, raw_text: str, img_w: int, img_h: int
     ) -> list[OcrBlock]:
-        """Parse GOT-OCR output into pixel-coordinate OcrBlock list."""
+        """Parse GOT-OCR output into OcrBlock list.
+
+        GOT-OCR 2.0 outputs plain text (no bounding boxes). With format=True,
+        output includes line breaks and structure. We split into per-line blocks
+        with null coordinates (the frontend skips highlight/selection for these).
+        """
         blocks: list[OcrBlock] = []
         box_pattern = re.compile(
             r"\((\d+),(\d+)\),\((\d+),(\d+)\)\s*(.*)"
         )
 
         lines = raw_text.strip().splitlines()
-        for idx, line in enumerate(lines):
+        para_id = 0
+        for line in lines:
             line = line.strip()
             if not line:
+                para_id += 1
                 continue
 
             match = box_pattern.search(line)
@@ -393,20 +403,16 @@ class GotOcrModel(BaseOcrModel):
                         w=abs(x2 - x1),
                         h=abs(y2 - y1),
                         score=0.9,
-                        paragraph_id=idx,
+                        paragraph_id=para_id,
                     )
                 )
             else:
-                # No bounding box — use full image as fallback
+                # No bounding box — text-only block (null coords)
                 blocks.append(
                     OcrBlock(
                         text=line,
-                        x=0.0,
-                        y=0.0,
-                        w=float(img_w),
-                        h=float(img_h),
-                        score=0.8,
-                        paragraph_id=idx,
+                        score=0.9,
+                        paragraph_id=para_id,
                     )
                 )
 

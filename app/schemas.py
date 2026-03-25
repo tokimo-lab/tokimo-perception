@@ -4,13 +4,13 @@ from pydantic import BaseModel, Field
 
 
 class OcrBlock(BaseModel):
-    """A single recognized text block with pixel coordinates."""
+    """A single recognized text block with optional pixel coordinates."""
 
     text: str
-    x: float = Field(ge=0.0, description="Left edge in pixels")
-    y: float = Field(ge=0.0, description="Top edge in pixels")
-    w: float = Field(ge=0.0, description="Width in pixels")
-    h: float = Field(ge=0.0, description="Height in pixels")
+    x: float | None = Field(default=None, description="Left edge in pixels (null if unavailable)")
+    y: float | None = Field(default=None, description="Top edge in pixels (null if unavailable)")
+    w: float | None = Field(default=None, description="Width in pixels (null if unavailable)")
+    h: float | None = Field(default=None, description="Height in pixels (null if unavailable)")
     score: float = Field(ge=0.0, le=1.0, description="Confidence score")
     paragraph_id: int = 0
 

@@ -19,12 +19,13 @@ from __future__ import annotations
 import io
 import logging
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
 from app.config import settings
-from app.schemas import ModelInfo, OcrBlock
+from app.schemas import DownloadProgress, ModelInfo, OcrBlock
 
 from .base import BaseOcrModel
 
@@ -33,6 +34,20 @@ logger = logging.getLogger(__name__)
 MODEL_HF_ID = "stepfun-ai/GOT-OCR-2.0-hf"
 MODEL_LOCAL_DIR = "got-ocr-2"
 ESTIMATED_SIZE_MB = 1200
+
+
+def _dir_size_bytes(path: Path) -> int:
+    """Recursively compute directory size in bytes."""
+    if not path.exists():
+        return 0
+    total = 0
+    for f in path.rglob("*"):
+        if f.is_file():
+            try:
+                total += f.stat().st_size
+            except OSError:
+                pass
+    return total
 
 
 class GotOcrModel(BaseOcrModel):
@@ -44,6 +59,8 @@ class GotOcrModel(BaseOcrModel):
         self._processor: Any | None = None
         self._device_name: str | None = None
         self._error: str | None = None
+        self._progress: DownloadProgress | None = None
+        self._load_thread: threading.Thread | None = None
 
     def model_id(self) -> str:
         return "got-ocr-2"
@@ -51,6 +68,8 @@ class GotOcrModel(BaseOcrModel):
     def info(self) -> ModelInfo:
         if self._model is not None:
             status = "ready"
+        elif self.is_busy():
+            status = self._progress.phase if self._progress else "loading"
         elif self._error:
             status = "error"
         else:
@@ -67,6 +86,8 @@ class GotOcrModel(BaseOcrModel):
             size_mb=ESTIMATED_SIZE_MB,
             requires_gpu=False,
             gpu_recommended=True,
+            progress=self._progress,
+            error_message=self._error,
         )
 
     def is_loaded(self) -> bool:
@@ -78,7 +99,166 @@ class GotOcrModel(BaseOcrModel):
     def load_error(self) -> str | None:
         return self._error
 
+    def start_background_load(self) -> None:
+        """Start model download + load in a background thread."""
+        if self.is_loaded() or self.is_busy():
+            return
+        self._error = None
+        self._progress = DownloadProgress(phase="downloading", percent=0)
+        self._load_thread = threading.Thread(
+            target=self._background_load, daemon=True
+        )
+        self._load_thread.start()
+
+    def _background_load(self) -> None:
+        """Run in background thread: download → load → ready."""
+        model_path = Path(settings.models_dir) / MODEL_LOCAL_DIR
+        total_bytes = ESTIMATED_SIZE_MB * 1024 * 1024
+
+        try:
+            import torch
+            from transformers import AutoModel, AutoTokenizer
+        except ImportError as e:
+            self._error = f"Missing dependency: {e}. Install torch and transformers."
+            self._progress = DownloadProgress(phase="error")
+            logger.error(self._error)
+            return
+
+        # Phase 1: Download if not already present
+        needs_download = not model_path.exists() or not any(model_path.iterdir())
+        if needs_download:
+            logger.info(
+                "Downloading GOT-OCR 2.0 from HuggingFace: %s → %s",
+                MODEL_HF_ID,
+                model_path,
+            )
+            try:
+                from huggingface_hub import HfApi, snapshot_download
+
+                # Get accurate total size from HF API
+                try:
+                    api = HfApi()
+                    repo_info = api.model_info(MODEL_HF_ID, files_metadata=True)
+                    if repo_info.siblings:
+                        total_bytes = sum(
+                            s.size for s in repo_info.siblings if s.size
+                        )
+                        logger.info(
+                            "Total download size: %.1f MB",
+                            total_bytes / 1024 / 1024,
+                        )
+                except Exception as e:
+                    logger.warning("Could not fetch HF model info: %s", e)
+
+                # Start download with progress monitoring
+                self._progress = DownloadProgress(
+                    phase="downloading",
+                    total_bytes=total_bytes,
+                    percent=0,
+                )
+
+                # Monitor progress in a separate thread
+                stop_monitor = threading.Event()
+                monitor_thread = threading.Thread(
+                    target=self._monitor_download,
+                    args=(model_path, total_bytes, stop_monitor),
+                    daemon=True,
+                )
+                monitor_thread.start()
+
+                snapshot_download(
+                    MODEL_HF_ID,
+                    local_dir=str(model_path),
+                )
+
+                stop_monitor.set()
+                monitor_thread.join(timeout=2)
+
+                self._progress = DownloadProgress(
+                    phase="loading",
+                    downloaded_bytes=total_bytes,
+                    total_bytes=total_bytes,
+                    percent=100,
+                )
+
+            except Exception as e:
+                self._error = f"Download failed: {e}"
+                self._progress = DownloadProgress(phase="error")
+                logger.error(self._error)
+                return
+        else:
+            logger.info("Loading GOT-OCR 2.0 from local path: %s", model_path)
+
+        # Phase 2: Load model into memory
+        self._progress = DownloadProgress(
+            phase="loading",
+            downloaded_bytes=total_bytes,
+            total_bytes=total_bytes,
+            percent=100,
+        )
+
+        device = settings.resolved_device
+        dtype = torch.float16 if device.startswith("cuda") else torch.float32
+        source = str(model_path) if model_path.exists() else MODEL_HF_ID
+
+        try:
+            self._tokenizer = AutoTokenizer.from_pretrained(
+                source, trust_remote_code=True
+            )
+            self._model = AutoModel.from_pretrained(
+                source,
+                trust_remote_code=True,
+                torch_dtype=dtype,
+                low_cpu_mem_usage=True,
+                device_map=device if device.startswith("cuda") else None,
+            )
+            if not device.startswith("cuda"):
+                self._model = self._model.to(device)
+
+            self._model.eval()
+            self._device_name = device
+            self._progress = DownloadProgress(phase="complete", percent=100)
+            logger.info("GOT-OCR 2.0 loaded on %s (dtype=%s)", device, dtype)
+        except Exception as e:
+            self._error = f"Failed to load GOT-OCR 2.0: {e}"
+            self._progress = DownloadProgress(phase="error")
+            logger.error(self._error)
+            self._model = None
+            self._tokenizer = None
+
+    def _monitor_download(
+        self, model_path: Path, total_bytes: int, stop: threading.Event
+    ) -> None:
+        """Periodically check download directory size and update progress."""
+        last_bytes = 0
+        last_time = time.monotonic()
+
+        while not stop.is_set():
+            stop.wait(1.5)
+            current_bytes = _dir_size_bytes(model_path)
+            now = time.monotonic()
+            elapsed = now - last_time
+
+            speed = (current_bytes - last_bytes) / elapsed if elapsed > 0 else 0
+            percent = (
+                min(current_bytes / total_bytes * 100, 99.9)
+                if total_bytes > 0
+                else 0
+            )
+
+            self._progress = DownloadProgress(
+                phase="downloading",
+                downloaded_bytes=current_bytes,
+                total_bytes=total_bytes,
+                speed_bps=speed,
+                percent=round(percent, 1),
+            )
+
+            last_bytes = current_bytes
+            last_time = now
+
     async def load(self) -> None:
+        """Synchronous load (used by /ocr lazy-load fallback)."""
         self._error = None
         model_path = Path(settings.models_dir) / MODEL_LOCAL_DIR
 
@@ -90,7 +270,6 @@ class GotOcrModel(BaseOcrModel):
             logger.error(self._error)
             raise RuntimeError(self._error) from e
 
-        # Resolve where to load from: local dir if it exists, else HF hub id
         if model_path.exists() and any(model_path.iterdir()):
             source = str(model_path)
             logger.info("Loading GOT-OCR 2.0 from local path: %s", source)
@@ -98,12 +277,9 @@ class GotOcrModel(BaseOcrModel):
             source = MODEL_HF_ID
             logger.info(
                 "Local weights not found at %s. "
-                "Will attempt to download from Hugging Face: %s. "
-                "To pre-download: huggingface-cli download %s --local-dir %s",
+                "Will attempt to download from Hugging Face: %s.",
                 model_path,
                 MODEL_HF_ID,
-                MODEL_HF_ID,
-                model_path,
             )
 
         device = settings.resolved_device
@@ -125,6 +301,7 @@ class GotOcrModel(BaseOcrModel):
 
             self._model.eval()
             self._device_name = device
+            self._progress = None
             logger.info("GOT-OCR 2.0 loaded on %s (dtype=%s)", device, dtype)
         except Exception as e:
             self._error = f"Failed to load GOT-OCR 2.0: {e}"
@@ -139,6 +316,7 @@ class GotOcrModel(BaseOcrModel):
         self._processor = None
         self._device_name = None
         self._error = None
+        self._progress = None
 
         try:
             import torch
@@ -174,15 +352,8 @@ class GotOcrModel(BaseOcrModel):
         return blocks
 
     def _run_inference(self, image: Any) -> str:
-        """Run the GOT-OCR model on a PIL Image.
-
-        GOT-OCR 2.0 supports multiple task types via the chat() method:
-        - "ocr": plain text extraction
-        - "format": formatted text (markdown/latex)
-        The model's chat() interface returns the recognized text directly.
-        """
+        """Run the GOT-OCR model on a PIL Image."""
         try:
-            # GOT-OCR 2.0 HF version uses model.chat() with a tokenizer
             result = self._model.chat(
                 self._tokenizer,
                 image,
@@ -196,19 +367,8 @@ class GotOcrModel(BaseOcrModel):
     def _parse_output(
         self, raw_text: str, img_w: int, img_h: int
     ) -> list[OcrBlock]:
-        """Parse GOT-OCR output into normalized OcrBlock list.
-
-        GOT-OCR 2.0 typically returns plain text (one or more lines).
-        When using "ocr" mode it may include bounding box info in a
-        structured format. For now we treat each non-empty line as a
-        separate block and assign sequential paragraph IDs.
-
-        If the output contains coordinate annotations in the format
-        (x1,y1,x2,y2), we parse those. Otherwise we return full-image
-        blocks with the text.
-        """
+        """Parse GOT-OCR output into normalized OcrBlock list."""
         blocks: list[OcrBlock] = []
-        # Try to parse structured output: <box>(x1,y1),(x2,y2)</box> text
         box_pattern = re.compile(
             r"\((\d+),(\d+)\),\((\d+),(\d+)\)\s*(.*)"
         )
@@ -238,7 +398,6 @@ class GotOcrModel(BaseOcrModel):
                     )
                 )
             else:
-                # No coordinates — return as full-image block
                 blocks.append(
                     OcrBlock(
                         text=line,

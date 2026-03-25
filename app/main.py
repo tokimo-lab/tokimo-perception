@@ -127,6 +127,15 @@ async def load_model(model_id: str) -> dict[str, str]:
     model = _get_model(model_id)
     if model.is_loaded():
         return {"status": "already_loaded", "model": model_id}
+    if model.is_busy():
+        return {"status": "in_progress", "model": model_id}
+
+    # Use background loading if the model supports it (GotOcrModel)
+    if hasattr(model, "start_background_load"):
+        model.start_background_load()
+        return {"status": "started", "model": model_id}
+
+    # Fallback: synchronous load
     try:
         await model.load()
         return {"status": "loaded", "model": model_id}

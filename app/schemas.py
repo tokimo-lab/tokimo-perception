@@ -31,14 +31,28 @@ class OcrResponse(BaseModel):
     processing_time_ms: float
 
 
+class DownloadProgress(BaseModel):
+    """Progress info for model download / load."""
+
+    phase: str = Field(description="downloading | loading | complete | error")
+    downloaded_bytes: int = 0
+    total_bytes: int = 0
+    speed_bps: float = 0
+    percent: float = 0
+
+
 class ModelInfo(BaseModel):
     id: str
     name: str
     description: str
-    status: str = Field(description="ready | loading | not_loaded | error")
+    status: str = Field(
+        description="ready | downloading | loading | not_loaded | error"
+    )
     size_mb: int
     requires_gpu: bool
     gpu_recommended: bool
+    progress: DownloadProgress | None = None
+    error_message: str | None = None
 
 
 class ModelHealthStatus(BaseModel):

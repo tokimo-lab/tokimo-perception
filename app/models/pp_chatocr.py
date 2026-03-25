@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import settings
-from app.schemas import ModelInfo, OcrBlock
+from app.schemas import DownloadProgress, ModelInfo, OcrBlock
 
 from .base import BaseOcrModel
 
@@ -36,6 +36,7 @@ class PpChatOcrModel(BaseOcrModel):
         self._ocr_engine: Any | None = None
         self._device_name: str | None = None
         self._error: str | None = None
+        self._progress: DownloadProgress | None = None
 
     def model_id(self) -> str:
         return "pp-chatocr-v3"
@@ -43,6 +44,8 @@ class PpChatOcrModel(BaseOcrModel):
     def info(self) -> ModelInfo:
         if self._ocr_engine is not None:
             status = "ready"
+        elif self.is_busy():
+            status = self._progress.phase if self._progress else "loading"
         elif self._error:
             status = "error"
         else:
@@ -59,6 +62,8 @@ class PpChatOcrModel(BaseOcrModel):
             size_mb=ESTIMATED_SIZE_MB,
             requires_gpu=True,
             gpu_recommended=True,
+            progress=self._progress,
+            error_message=self._error,
         )
 
     def is_loaded(self) -> bool:

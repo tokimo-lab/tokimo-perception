@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from app.schemas import ModelInfo, OcrBlock
+from app.schemas import DownloadProgress, ModelInfo, OcrBlock
 
 
 class BaseOcrModel(ABC):
     """Abstract interface for all OCR model backends."""
+
+    _progress: DownloadProgress | None = None
 
     @abstractmethod
     def model_id(self) -> str:
@@ -32,6 +34,17 @@ class BaseOcrModel(ABC):
     def load_error(self) -> str | None:
         """Return the last load error message, or None."""
         ...
+
+    def get_progress(self) -> DownloadProgress | None:
+        """Return current download/load progress, or None."""
+        return self._progress
+
+    def is_busy(self) -> bool:
+        """True if the model is currently downloading or loading."""
+        return self._progress is not None and self._progress.phase in (
+            "downloading",
+            "loading",
+        )
 
     @abstractmethod
     async def load(self) -> None:

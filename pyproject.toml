@@ -12,6 +12,7 @@ dependencies = [
     "numpy>=1.26",
     "torch>=2.1",
     "transformers>=4.40",
+    "accelerate>=1.13.0",
 ]
 
 [project.optional-dependencies]

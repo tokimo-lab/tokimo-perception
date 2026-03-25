@@ -1,0 +1,26 @@
+services:
+  python-ocr:
+    build: .
+    container_name: tokimo-python-ocr
+    ports:
+      - "5679:5679"
+    volumes:
+      - ../../data/ai-models:/data/models
+    environment:
+      - MODELS_DIR=/data/models
+      - DEVICE=cpu
+      - GOT_OCR_ENABLED=true
+      - PP_CHATOCR_ENABLED=false
+      - LOG_LEVEL=info
+    restart: unless-stopped
+
+    # ── GPU support ──────────────────────────────────────────────
+    # Uncomment the section below and set DEVICE=cuda to enable GPU:
+    #
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]

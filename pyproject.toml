@@ -1,0 +1,25 @@
+[project]
+name = "tokimo-python-ocr"
+version = "0.1.0"
+description = "VLM-based OCR sidecar service for Tokimo"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "Pillow>=10.0",
+    "numpy>=1.26",
+    "torch>=2.1",
+    "transformers>=4.40",
+]
+
+[project.optional-dependencies]
+paddle = [
+    "paddlepaddle>=2.6",
+    "paddleocr>=2.8",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends._legacy:_Backend"

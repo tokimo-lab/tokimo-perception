@@ -98,6 +98,31 @@ impl AiService {
         manager.ocr(model, image_bytes).await
     }
 
+    /// Hybrid OCR: `det_model` provides bounding boxes, `vlm_model` provides
+    /// accurate text. Results are merged by the sidecar.
+    pub async fn ocr_hybrid(
+        &self,
+        image_bytes: &[u8],
+        det_model: &str,
+        vlm_model: &str,
+    ) -> Result<Vec<ocr::OcrItem>, String> {
+        if !self.config.enable_ocr {
+            return Err("OCR is disabled".into());
+        }
+        let manager = self
+            .ocr_manager
+            .get_or_try_init(|| async {
+                Ok::<_, String>(ocr_manager::OcrManager::new(
+                    self.config.models_dir.clone(),
+                    self.config.ocr_sidecar_url.clone(),
+                ))
+            })
+            .await?;
+        manager
+            .ocr_hybrid(det_model, vlm_model, image_bytes)
+            .await
+    }
+
     /// List available OCR models and their status.
     pub async fn ocr_available_models(&self) -> Vec<ocr_manager::OcrModelInfo> {
         match self.ocr_manager.get() {

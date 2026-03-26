@@ -13,10 +13,12 @@ pub const MODEL_PP_OCRV5_MOBILE: &str = "pp-ocrv5-mobile";
 pub const MODEL_PP_OCRV5_SERVER: &str = "pp-ocrv5-server";
 pub const MODEL_GOT_OCR_2: &str = "got-ocr-2";
 pub const MODEL_PP_CHATOCR_V3: &str = "pp-chatocr-v3";
-pub const MODEL_HYBRID: &str = "hybrid";
 
 /// Default model when none specified.
 pub const DEFAULT_MODEL: &str = MODEL_PP_OCRV5_SERVER;
+
+/// Models that do NOT provide bounding boxes (text-only output).
+const NO_BLOCK_MODELS: &[&str] = &[MODEL_GOT_OCR_2];
 
 /// Metadata about an available OCR model.
 #[derive(Debug, Clone)]
@@ -49,11 +51,6 @@ impl OcrManager {
     /// Run OCR with the given model. Lazy-initializes the backend on first call.
     /// For VLM sidecar models, makes an HTTP call to the Python sidecar.
     pub async fn ocr(&self, model_name: &str, image_bytes: &[u8]) -> Result<Vec<OcrItem>, String> {
-        // Hybrid mode: PP-OCRv5 Server detection + GOT-OCR recognition
-        if model_name == MODEL_HYBRID {
-            return self.ocr_hybrid(image_bytes).await;
-        }
-
         // VLM models: call sidecar HTTP endpoint directly (async)
         if matches!(model_name, MODEL_GOT_OCR_2 | MODEL_PP_CHATOCR_V3) {
             let sidecar_url = self.sidecar_url.as_deref().ok_or_else(|| {
@@ -71,21 +68,28 @@ impl OcrManager {
         backend.recognize(&img)
     }
 
-    /// Hybrid OCR: run PP-OCRv5 Server for detection, GOT-OCR for recognition,
-    /// merge via sidecar `/ocr/hybrid` endpoint.
-    async fn ocr_hybrid(&self, image_bytes: &[u8]) -> Result<Vec<OcrItem>, String> {
+    /// Hybrid OCR: use `det_model` for bounding-box detection, `vlm_model` for
+    /// accurate text recognition, then merge via sidecar.
+    pub async fn ocr_hybrid(
+        &self,
+        det_model: &str,
+        vlm_model: &str,
+        image_bytes: &[u8],
+    ) -> Result<Vec<OcrItem>, String> {
         let sidecar_url = self.sidecar_url.as_deref().ok_or_else(|| {
             "Hybrid OCR requires OCR_SIDECAR_URL to be configured".to_string()
         })?;
 
-        // 1. Run PP-OCRv5 Server locally for detection (fast, ~380ms)
-        let img =
-            image::load_from_memory(image_bytes).map_err(|e| format!("Invalid image: {e}"))?;
-        let backend = self.get_or_init_backend(MODEL_PP_OCRV5_SERVER).await?;
-        let det_items = backend.recognize(&img)?;
+        // 1. Run detection model for bounding boxes
+        let det_items = self.ocr(det_model, image_bytes).await?;
 
         // 2. Send image + det_blocks to sidecar for VLM recognition + merge
-        hybrid_ocr_via_sidecar(sidecar_url, image_bytes, &det_items).await
+        hybrid_ocr_via_sidecar(sidecar_url, image_bytes, &det_items, vlm_model).await
+    }
+
+    /// Check whether a model provides bounding-box coordinates.
+    pub fn model_supports_blocks(model_name: &str) -> bool {
+        !NO_BLOCK_MODELS.contains(&model_name)
     }
 
     /// List all known models with their current status.
@@ -110,11 +114,6 @@ impl OcrManager {
                 id: MODEL_PP_CHATOCR_V3,
                 display_name: "PP-ChatOCR v3 (VLM sidecar)",
                 loaded: self.is_loaded(MODEL_PP_CHATOCR_V3),
-            },
-            OcrModelInfo {
-                id: MODEL_HYBRID,
-                display_name: "Hybrid (PP-OCRv5 + GOT-OCR)",
-                loaded: self.is_loaded(MODEL_PP_OCRV5_SERVER), // detection side
             },
         ]
     }
@@ -249,11 +248,12 @@ struct SidecarDetBlock {
 }
 
 /// Call the sidecar `/ocr/hybrid` endpoint: send det_blocks + image,
-/// sidecar runs GOT-OCR and merges text with detection coordinates.
+/// sidecar runs the VLM model and merges text with detection coordinates.
 async fn hybrid_ocr_via_sidecar(
     sidecar_url: &str,
     image_bytes: &[u8],
     det_items: &[OcrItem],
+    vlm_model: &str,
 ) -> Result<Vec<OcrItem>, String> {
     let b64 = base64::engine::general_purpose::STANDARD.encode(image_bytes);
 
@@ -274,7 +274,7 @@ async fn hybrid_ocr_via_sidecar(
     let body = serde_json::json!({
         "image": b64,
         "det_blocks": det_blocks,
-        "vlm_model": MODEL_GOT_OCR_2,
+        "vlm_model": vlm_model,
     });
 
     let client = reqwest::Client::new();

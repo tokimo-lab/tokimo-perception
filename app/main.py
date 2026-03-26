@@ -237,21 +237,19 @@ async def ocr_hybrid(request: HybridOcrRequest) -> OcrResponse:
 def _merge_ocr_results(
     det_blocks: list[DetBlock], vlm_text: str
 ) -> list[OcrBlock]:
-    """Merge PP-OCRv5 detection coords with VLM-recognized text via difflib."""
+    """Merge PP-OCRv5 detection coords with VLM text via sequential matching.
+
+    For each detection block, find the best-matching substring in the VLM text
+    starting from the current position. Both models read in the same spatial
+    order, so we advance linearly through the VLM text.
+    """
     import difflib
 
     if not det_blocks:
         return []
 
-    # Build concatenated detection text with per-char block index
-    det_full = ""
-    char_to_block: list[int] = []
-    for idx, block in enumerate(det_blocks):
-        for _ in block.text:
-            char_to_block.append(idx)
-        det_full += block.text
-
-    if not det_full or not vlm_text:
+    vlm = vlm_text.strip()
+    if not vlm:
         return [
             OcrBlock(
                 text=b.text,
@@ -265,65 +263,57 @@ def _merge_ocr_results(
             for b in det_blocks
         ]
 
-    # Align the two text streams
-    sm = difflib.SequenceMatcher(None, det_full, vlm_text, autojunk=False)
-    block_chars: list[list[str]] = [[] for _ in det_blocks]
-
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        if tag == "equal":
-            for di, ji in zip(range(i1, i2), range(j1, j2)):
-                block_chars[char_to_block[di]].append(vlm_text[ji])
-
-        elif tag == "replace":
-            # Distribute VLM chars proportionally among involved det blocks
-            block_indices = [char_to_block[di] for di in range(i1, i2)]
-            unique_blocks: list[tuple[int, int]] = []
-            cur, cnt = block_indices[0], 0
-            for bi in block_indices:
-                if bi == cur:
-                    cnt += 1
-                else:
-                    unique_blocks.append((cur, cnt))
-                    cur, cnt = bi, 1
-            unique_blocks.append((cur, cnt))
-
-            total_det = i2 - i1
-            vlm_chunk = vlm_text[j1:j2]
-            vlm_off = 0
-            for blk_idx, det_cnt in unique_blocks:
-                share = round(det_cnt / total_det * len(vlm_chunk))
-                block_chars[blk_idx].extend(vlm_chunk[vlm_off : vlm_off + share])
-                vlm_off += share
-            # Remainder goes to last block
-            if vlm_off < len(vlm_chunk):
-                block_chars[unique_blocks[-1][0]].extend(vlm_chunk[vlm_off:])
-
-        elif tag == "insert":
-            # Extra VLM text — attach to nearest det block
-            if i1 < len(char_to_block):
-                bi = char_to_block[i1]
-            elif char_to_block:
-                bi = char_to_block[-1]
-            else:
-                continue
-            block_chars[bi].extend(vlm_text[j1:j2])
-        # 'delete': det text not in VLM → skip
-
+    pos = 0  # Current position in VLM text
     result: list[OcrBlock] = []
-    for idx, block in enumerate(det_blocks):
-        merged_text = "".join(block_chars[idx]).strip()
-        if not merged_text:
-            merged_text = block.text  # fallback to detection text
-        result.append(
-            OcrBlock(
-                text=merged_text,
-                x=block.x,
-                y=block.y,
-                w=block.w,
-                h=block.h,
-                score=block.score,
-                paragraph_id=block.paragraph_id,
-            )
-        )
+
+    for block in det_blocks:
+        det = block.text.strip()
+        if not det or pos >= len(vlm):
+            result.append(_make_block(block, block.text))
+            continue
+
+        # Skip whitespace / newlines between blocks
+        while pos < len(vlm) and vlm[pos] in " \t\n\r":
+            pos += 1
+
+        if pos >= len(vlm):
+            result.append(_make_block(block, block.text))
+            continue
+
+        n = len(det)
+        max_end = min(len(vlm), pos + n * 3 + 30)
+
+        # Try different candidate lengths from current position
+        best_score = 0.0
+        best_len = n  # default: same length as detection
+        for try_len in range(max(1, n - 5), min(n + 15, max_end - pos + 1)):
+            candidate = vlm[pos : pos + try_len]
+            score = difflib.SequenceMatcher(
+                None, det, candidate, autojunk=False
+            ).ratio()
+            if score > best_score:
+                best_score = score
+                best_len = try_len
+
+        if best_score >= 0.3:
+            matched = vlm[pos : pos + best_len]
+            pos += best_len
+            result.append(_make_block(block, matched))
+        else:
+            # No good match — keep detection text, advance conservatively
+            pos += n
+            result.append(_make_block(block, det))
 
     return result
+
+
+def _make_block(block: DetBlock, text: str) -> OcrBlock:
+    return OcrBlock(
+        text=text,
+        x=block.x,
+        y=block.y,
+        w=block.w,
+        h=block.h,
+        score=block.score,
+        paragraph_id=block.paragraph_id,
+    )

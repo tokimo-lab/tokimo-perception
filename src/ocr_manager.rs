@@ -70,12 +70,13 @@ impl OcrManager {
 
     /// Hybrid OCR: use `det_model` for bounding-box detection, `vlm_model` for
     /// accurate text recognition, then merge via sidecar.
+    /// Returns (merged_items, optional_debug_info).
     pub async fn ocr_hybrid(
         &self,
         det_model: &str,
         vlm_model: &str,
         image_bytes: &[u8],
-    ) -> Result<Vec<OcrItem>, String> {
+    ) -> Result<(Vec<OcrItem>, Option<serde_json::Value>), String> {
         let sidecar_url = self.sidecar_url.as_deref().ok_or_else(|| {
             "Hybrid OCR requires OCR_SIDECAR_URL to be configured".to_string()
         })?;
@@ -180,6 +181,7 @@ struct SidecarOcrResponse {
     blocks: Vec<SidecarOcrBlock>,
     #[allow(dead_code)]
     processing_time_ms: f64,
+    debug: Option<serde_json::Value>,
 }
 
 /// Call the Python OCR sidecar via HTTP to run VLM-based OCR.
@@ -254,7 +256,7 @@ async fn hybrid_ocr_via_sidecar(
     image_bytes: &[u8],
     det_items: &[OcrItem],
     vlm_model: &str,
-) -> Result<Vec<OcrItem>, String> {
+) -> Result<(Vec<OcrItem>, Option<serde_json::Value>), String> {
     let b64 = base64::engine::general_purpose::STANDARD.encode(image_bytes);
 
     let det_blocks: Vec<SidecarDetBlock> = det_items
@@ -299,7 +301,7 @@ async fn hybrid_ocr_via_sidecar(
         .await
         .map_err(|e| format!("Failed to parse sidecar hybrid response: {e}"))?;
 
-    Ok(result
+    let items = result
         .blocks
         .into_iter()
         .map(|b| OcrItem {
@@ -311,5 +313,7 @@ async fn hybrid_ocr_via_sidecar(
             h: b.h.map(|v| v as f32).unwrap_or(-1.0),
             paragraph_id: b.paragraph_id,
         })
-        .collect())
+        .collect();
+
+    Ok((items, result.debug))
 }

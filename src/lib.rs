@@ -100,12 +100,13 @@ impl AiService {
 
     /// Hybrid OCR: `det_model` provides bounding boxes, `vlm_model` provides
     /// accurate text. Results are merged by the sidecar.
+    /// Returns (merged_items, optional_debug_info).
     pub async fn ocr_hybrid(
         &self,
         image_bytes: &[u8],
         det_model: &str,
         vlm_model: &str,
-    ) -> Result<Vec<ocr::OcrItem>, String> {
+    ) -> Result<(Vec<ocr::OcrItem>, Option<serde_json::Value>), String> {
         if !self.config.enable_ocr {
             return Err("OCR is disabled".into());
         }

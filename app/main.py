@@ -228,10 +228,18 @@ async def ocr_hybrid(request: HybridOcrRequest) -> OcrResponse:
     merged = _merge_ocr_results(request.det_blocks, vlm_text)
     elapsed_ms = (time.monotonic() - start) * 1000
 
+    debug = {
+        "detModel": "pp-ocrv5",
+        "vlmModel": request.vlm_model,
+        "detTexts": [b.text for b in request.det_blocks],
+        "vlmText": vlm_text,
+    }
+
     return OcrResponse(
         model=f"hybrid:{request.vlm_model}",
         blocks=merged,
         processing_time_ms=round(elapsed_ms, 1),
+        debug=debug,
     )
 
 

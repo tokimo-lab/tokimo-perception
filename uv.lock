@@ -1911,6 +1911,7 @@ dependencies = [
     { name = "torch" },
     { name = "transformers" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "wordninja" },
 ]
 
 [package.optional-dependencies]
@@ -1938,6 +1939,7 @@ requires-dist = [
     { name = "torch", specifier = ">=2.1" },
     { name = "transformers", specifier = ">=4.40" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+    { name = "wordninja", specifier = ">=2.0" },
 ]
 provides-extras = ["paddle"]
 
@@ -2302,3 +2304,9 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/9a/3f/f70e03f40ffc9a30d817eef7da1be72ee4956ba8d7255c399a01b135902a/websockets-16.0-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:a653aea902e0324b52f1613332ddf50b00c06fdaf7e92624fbf8c77c78fa5767", size = 178735, upload-time = "2026-01-10T09:23:42.259Z" },
     { url = "https://files.pythonhosted.org/packages/6f/28/258ebab549c2bf3e64d2b0217b973467394a9cea8c42f70418ca2c5d0d2e/websockets-16.0-py3-none-any.whl", hash = "sha256:1637db62fad1dc833276dded54215f2c7fa46912301a24bd94d45d46a011ceec", size = 171598, upload-time = "2026-01-10T09:23:45.395Z" },
 ]
+
+[[package]]
+name = "wordninja"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/30/15/abe4af50f4be92b60c25e43c1c64d08453b51e46c32981d80b3aebec0260/wordninja-2.0.0.tar.gz", hash = "sha256:1a1cc7ec146ad19d6f71941ee82aef3d31221700f0d8bf844136cf8df79d281a", size = 541572, upload-time = "2019-08-10T02:16:54.944Z" }

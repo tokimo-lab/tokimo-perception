@@ -53,6 +53,7 @@ class OcrResponse(BaseModel):
     model: str
     blocks: list[OcrBlock]
     processing_time_ms: float
+    debug: dict | None = None
 
 
 class DownloadProgress(BaseModel):

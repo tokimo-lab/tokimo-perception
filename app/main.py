@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 import time
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -304,7 +305,18 @@ def _merge_ocr_results(
             pos += n
             result.append(_make_block(block, det))
 
-    return result
+    return [
+        OcrBlock(
+            text=_restore_word_spaces(b.text),
+            x=b.x,
+            y=b.y,
+            w=b.w,
+            h=b.h,
+            score=b.score,
+            paragraph_id=b.paragraph_id,
+        )
+        for b in result
+    ]
 
 
 def _make_block(block: DetBlock, text: str) -> OcrBlock:
@@ -317,3 +329,43 @@ def _make_block(block: DetBlock, text: str) -> OcrBlock:
         score=block.score,
         paragraph_id=block.paragraph_id,
     )
+
+
+def _restore_word_spaces(text: str) -> str:
+    """Restore spaces in concatenated English text from VLM OCR output.
+
+    GOT-OCR 2.0 often strips spaces between English words in plain mode.
+    This function uses regex heuristics + wordninja to re-insert word
+    boundaries while preserving punctuation, CJK text, and short tokens.
+    """
+    import wordninja
+
+    if len(text) < 10 or text.count(" ") / max(len(text), 1) > 0.05:
+        return text
+    cjk = sum(1 for c in text if ord(c) >= 0x4E00)
+    if cjk > len(text) * 0.3:
+        return text
+
+    s = text
+    # Letter↔digit boundaries
+    s = re.sub(r"([a-zA-Z])(\d)", r"\1 \2", s)
+    s = re.sub(r"(\d)([a-zA-Z])", r"\1 \2", s)
+    # Paren boundaries
+    s = re.sub(r"([a-zA-Z0-9])\(", r"\1 (", s)
+    s = re.sub(r"\)([a-zA-Z0-9])", r") \1", s)
+    # Comma/period → letter
+    s = re.sub(r",([a-zA-Z])", r", \1", s)
+    s = re.sub(r"\.([A-Z])", r". \1", s)
+    # camelCase: lowercase → uppercase
+    s = re.sub(r"([a-z])([A-Z])", r"\1 \2", s)
+
+    # Wordninja on remaining long alpha-only segments (>7 to skip acronyms)
+    segments = re.split(r"([^a-zA-Z']+)", s)
+    result_parts: list[str] = []
+    for seg in segments:
+        if re.match(r"^[a-zA-Z']+$", seg) and len(seg) > 7:
+            words = wordninja.split(seg)
+            result_parts.append(" ".join(words))
+        else:
+            result_parts.append(seg)
+    return "".join(result_parts)

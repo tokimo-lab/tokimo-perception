@@ -336,14 +336,11 @@ class GotOcrModel(BaseOcrModel):
         return blocks
 
     def _run_inference(self, image: Any) -> str:
-        """Run the GOT-OCR model on a PIL Image using processor + generate.
-
-        Uses format=True for structured output with line breaks.
-        """
+        """Run the GOT-OCR model on a PIL Image using processor + generate."""
         import torch
 
         try:
-            inputs = self._processor(image, return_tensors="pt", format=True)
+            inputs = self._processor(image, return_tensors="pt")
             # Move inputs to the same device as the model
             device = next(self._model.parameters()).device
             inputs = {k: v.to(device) for k, v in inputs.items()}
@@ -371,16 +368,22 @@ class GotOcrModel(BaseOcrModel):
     ) -> list[OcrBlock]:
         """Parse GOT-OCR output into OcrBlock list.
 
-        GOT-OCR 2.0 outputs plain text (no bounding boxes). With format=True,
-        output includes line breaks and structure. We split into per-line blocks
-        with null coordinates (the frontend skips highlight/selection for these).
+        GOT-OCR 2.0 outputs plain text without bounding boxes.
+        We split into blocks by sentence boundaries / line breaks.
+        Each block has null coordinates (frontend skips highlight for these).
         """
         blocks: list[OcrBlock] = []
         box_pattern = re.compile(
             r"\((\d+),(\d+)\),\((\d+),(\d+)\)\s*(.*)"
         )
 
+        # First try splitting by newlines (if any exist)
         lines = raw_text.strip().splitlines()
+
+        # If all text is on one line, split by sentence boundaries
+        if len(lines) == 1 and len(lines[0]) > 100:
+            lines = self._split_into_sentences(lines[0])
+
         para_id = 0
         for line in lines:
             line = line.strip()
@@ -417,3 +420,21 @@ class GotOcrModel(BaseOcrModel):
                 )
 
         return blocks
+
+    @staticmethod
+    def _split_into_sentences(text: str) -> list[str]:
+        """Split a long text string into sentence-level chunks."""
+        # Split on Chinese/English sentence-ending punctuation
+        parts = re.split(r'(?<=[。！？.!?\n])\s*', text)
+        result: list[str] = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            # Further split very long segments at commas/semicolons
+            if len(part) > 120:
+                sub = re.split(r'(?<=[，；,;])\s*', part)
+                result.extend(s.strip() for s in sub if s.strip())
+            else:
+                result.append(part)
+        return result if result else [text]

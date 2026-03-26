@@ -25,6 +25,30 @@ class OcrOptions(BaseModel):
     language: str = "auto"
 
 
+class DetBlock(BaseModel):
+    """Detection block from PP-OCRv5 (coordinates + rough text)."""
+
+    text: str
+    x: float
+    y: float
+    w: float
+    h: float
+    score: float = 0.9
+    paragraph_id: int = 0
+
+
+class HybridOcrRequest(BaseModel):
+    """Hybrid OCR: use detection blocks for coordinates + VLM for accurate text."""
+
+    image: str = Field(description="Base64-encoded image data")
+    det_blocks: list[DetBlock] = Field(
+        description="Detection blocks with coordinates from PP-OCRv5"
+    )
+    vlm_model: str = Field(
+        default="got-ocr-2", description="VLM model for text recognition"
+    )
+
+
 class OcrResponse(BaseModel):
     model: str
     blocks: list[OcrBlock]

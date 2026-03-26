@@ -1,13 +1,13 @@
 [package]
-name = "rust-ai"
+name = "rust-ocr"
 version = "0.1.0"
 edition = "2021"
-description = "Unified AI service: OCR + CLIP + Face recognition via ONNX Runtime (library)"
+description = "OCR + CLIP + Face recognition via ONNX Runtime (library)"
 
 [workspace]
 
 [lib]
-name = "rust_ai"
+name = "rust_ocr"
 path = "src/lib.rs"
 
 [dependencies]

@@ -143,6 +143,11 @@ pub fn all_models_present(config: &AiConfig) -> bool {
     true
 }
 
+/// Download a single model file to the given destination path.
+pub async fn download_model_file(url: &str, dest: &str) -> Result<(), String> {
+    download_file(url, dest).await
+}
+
 async fn download_file(url: &str, dest: &str) -> Result<(), String> {
     let parent = Path::new(dest)
         .parent()

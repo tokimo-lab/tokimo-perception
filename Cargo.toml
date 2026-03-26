@@ -2,7 +2,7 @@
 name = "rust-ocr"
 version = "0.1.0"
 edition = "2021"
-description = "OCR + CLIP + Face recognition via ONNX Runtime (library)"
+description = "OCR + CLIP + Face recognition + STT via ONNX Runtime / sherpa-onnx (library)"
 
 [workspace]
 
@@ -28,6 +28,16 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 
 # Logging
 tracing = "0.1"
+
+# Memory management (malloc_trim on Linux)
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+# Speech-to-text (sherpa-onnx official Rust bindings, prebuilt libs auto-downloaded)
+sherpa-onnx = "1.12"
+
+# Audio processing
+hound = "3.5"
 
 # Model download
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }

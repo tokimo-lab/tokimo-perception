@@ -7,6 +7,7 @@ pub struct AiConfig {
     pub enable_ocr: bool,
     pub enable_clip: bool,
     pub enable_face: bool,
+    pub enable_stt: bool,
     /// Optional URL for the VLM OCR sidecar (GOT-OCR-2, PP-ChatOCR-v3).
     pub ocr_sidecar_url: Option<String>,
 }
@@ -18,6 +19,7 @@ impl Default for AiConfig {
             enable_ocr: true,
             enable_clip: true,
             enable_face: true,
+            enable_stt: true,
             ocr_sidecar_url: None,
         }
     }

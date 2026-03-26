@@ -344,12 +344,13 @@ def _restore_word_spaces(text: str) -> str:
 
     GOT-OCR 2.0 often strips spaces between English words in plain mode.
     This function uses regex heuristics + wordninja to re-insert word
-    boundaries while preserving punctuation, CJK text, and short tokens.
+    boundaries, then applies spell-correction for common OCR confusions
+    (e.g. "Pvthon" → "Python"), while preserving CJK text and short tokens.
     """
     import wordninja
 
     if len(text) < 10 or text.count(" ") / max(len(text), 1) > 0.05:
-        return text
+        return _spell_correct(text)
     cjk = sum(1 for c in text if ord(c) >= 0x4E00)
     if cjk > len(text) * 0.3:
         return text
@@ -376,4 +377,69 @@ def _restore_word_spaces(text: str) -> str:
             result_parts.append(" ".join(words))
         else:
             result_parts.append(seg)
-    return "".join(result_parts)
+    return _spell_correct("".join(result_parts))
+
+
+_spell_checker = None
+
+# Common technical terms to prevent spell-correction mangling
+_TECH_TERMS = {
+    "numpy", "scipy", "pytorch", "opencv", "cuda", "nginx", "webpack",
+    "vite", "pnpm", "npm", "jsx", "tsx", "async", "await", "mutex",
+    "tuple", "struct", "enum", "impl", "tokio", "axum", "serde",
+    "prisma", "postgres", "redis", "mongodb", "sqlite", "mysql",
+    "ubuntu", "debian", "conda", "pipenv", "fastapi", "uvicorn",
+    "dockerfile", "kubernetes", "github", "gitlab", "bitbucket",
+    "python", "javascript", "typescript", "golang", "kotlin", "swift",
+    "cmake", "makefile", "dockerfile", "eslint", "biome", "pytest",
+    "ffmpeg", "ffprobe", "onnx", "tensorrt", "openai", "llama",
+}
+
+
+def _get_spell_checker():
+    global _spell_checker
+    if _spell_checker is None:
+        from spellchecker import SpellChecker
+
+        _spell_checker = SpellChecker()
+        # Add tech terms so they're recognized as valid words
+        _spell_checker.word_frequency.load_words(_TECH_TERMS)
+    return _spell_checker
+
+
+def _spell_correct(text: str) -> str:
+    """Apply spell correction to English words, preserving case and non-alpha tokens.
+
+    Conservative approach: only corrects words that are:
+    - Pure ASCII alpha, 5-20 chars (skip short words to avoid mangling tech terms)
+    - Not all-uppercase (preserves acronyms: API, HTTP, etc.)
+    - Unknown to the dictionary (including tech terms)
+    - Corrected word has high frequency (top common words only)
+    """
+    spell = _get_spell_checker()
+    tokens = re.split(r"(\s+|[^a-zA-Z]+)", text)
+    result: list[str] = []
+    for tok in tokens:
+        if (
+            re.match(r"^[a-zA-Z]+$", tok)
+            and 5 <= len(tok) <= 20
+            and not tok.isupper()
+            and tok.lower() not in spell
+        ):
+            correction = spell.correction(tok.lower())
+            if (
+                correction
+                and correction != tok.lower()
+                and spell.word_usage_frequency(correction) > 5e-7
+            ):
+                # Preserve original case pattern
+                if tok[0].isupper() and tok[1:].islower():
+                    correction = correction.capitalize()
+                elif tok.isupper():
+                    correction = correction.upper()
+                result.append(correction)
+            else:
+                result.append(tok)
+        else:
+            result.append(tok)
+    return "".join(result)

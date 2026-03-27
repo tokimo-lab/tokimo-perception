@@ -1,7 +1,7 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use base64::Engine;
-use image::DynamicImage;
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 
@@ -31,13 +31,13 @@ pub struct OcrModelInfo {
 /// Routes OCR requests to the appropriate backend. Backends are lazy-loaded.
 pub struct OcrManager {
     models_dir: String,
-    backends: HashMap<&'static str, OnceCell<Box<dyn OcrBackend>>>,
+    backends: HashMap<&'static str, OnceCell<Arc<dyn OcrBackend>>>,
     sidecar_url: Option<String>,
 }
 
 impl OcrManager {
     pub fn new(models_dir: String, sidecar_url: Option<String>) -> Self {
-        let mut backends: HashMap<&'static str, OnceCell<Box<dyn OcrBackend>>> = HashMap::new();
+        let mut backends: HashMap<&'static str, OnceCell<Arc<dyn OcrBackend>>> = HashMap::new();
         backends.insert(MODEL_PP_OCRV5_MOBILE, OnceCell::new());
         backends.insert(MODEL_PP_OCRV5_SERVER, OnceCell::new());
         // VLM models (GOT-OCR-2, PP-ChatOCR-v3) are handled via HTTP sidecar, not backends
@@ -61,11 +61,18 @@ impl OcrManager {
             return vlm_ocr_via_sidecar(sidecar_url, model_name, image_bytes).await;
         }
 
-        // Local Paddle models: use sync backend trait
-        let img =
-            image::load_from_memory(image_bytes).map_err(|e| format!("Invalid image: {e}"))?;
-        let backend = self.get_or_init_backend(model_name).await?;
-        backend.recognize(&img)
+        // Local Paddle models: decode image + run ONNX inference in a blocking
+        // thread to avoid starving the tokio async runtime.
+        let bytes = image_bytes.to_vec();
+        let backend = Arc::clone(self.get_or_init_backend(model_name).await?);
+
+        tokio::task::spawn_blocking(move || {
+            let img =
+                image::load_from_memory(&bytes).map_err(|e| format!("Invalid image: {e}"))?;
+            backend.recognize(&img)
+        })
+        .await
+        .map_err(|e| format!("OCR task panicked: {e}"))?
     }
 
     /// Hybrid OCR: use `det_model` for bounding-box detection, `vlm_model` for
@@ -128,30 +135,30 @@ impl OcrManager {
     async fn get_or_init_backend(
         &self,
         model_name: &str,
-    ) -> Result<&dyn OcrBackend, String> {
+    ) -> Result<&Arc<dyn OcrBackend>, String> {
         let cell = self
             .backends
             .get(model_name)
             .ok_or_else(|| format!("Unknown OCR model: {model_name}"))?;
 
-        let boxed = cell
+        let arc = cell
             .get_or_try_init(|| async { self.create_backend(model_name) })
             .await?;
 
-        Ok(boxed.as_ref())
+        Ok(arc)
     }
 
-    fn create_backend(&self, model_name: &str) -> Result<Box<dyn OcrBackend>, String> {
+    fn create_backend(&self, model_name: &str) -> Result<Arc<dyn OcrBackend>, String> {
         match model_name {
             MODEL_PP_OCRV5_MOBILE => {
                 let svc =
                     crate::ocr::OcrService::new(&self.models_dir, PaddleOcrVariant::Mobile)?;
-                Ok(Box::new(svc))
+                Ok(Arc::new(svc))
             }
             MODEL_PP_OCRV5_SERVER => {
                 let svc =
                     crate::ocr::OcrService::new(&self.models_dir, PaddleOcrVariant::Server)?;
-                Ok(Box::new(svc))
+                Ok(Arc::new(svc))
             }
             _ => Err(format!("Unknown OCR model: {model_name}")),
         }

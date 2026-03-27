@@ -1,8 +1,8 @@
 /// BERT WordPiece tokenizer for Chinese-CLIP.
-/// Vocabulary is embedded at compile time from data/vocab.txt (21128 tokens).
+/// Vocabulary is embedded at compile time from config/vocab.txt (21128 tokens).
 use std::collections::HashMap;
 
-static VOCAB_TEXT: &str = include_str!("../data/vocab.txt");
+static VOCAB_TEXT: &str = include_str!("../config/vocab.txt");
 
 pub struct BertTokenizer {
     vocab: HashMap<String, i64>,

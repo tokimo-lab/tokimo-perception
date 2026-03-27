@@ -9,7 +9,7 @@ use ort::{session::Session, value::Tensor};
 
 use crate::ocr_backend::{OcrBackend, PaddleOcrVariant};
 
-static OCR_KEYS: &str = include_str!("../data/ppocr_keys_v5.txt");
+static OCR_KEYS: &str = include_str!("../config/ppocr_keys_v5.txt");
 
 pub struct OcrItem {
     pub text: String,

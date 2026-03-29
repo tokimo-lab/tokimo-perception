@@ -13,6 +13,7 @@ pub mod ocr_attention;
 pub mod ocr_backend;
 pub mod ocr_detector;
 pub mod ocr_manager;
+pub mod ocr_parseq;
 pub mod stt;
 mod tokenizer;
 

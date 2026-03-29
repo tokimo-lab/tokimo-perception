@@ -50,6 +50,9 @@ pub async fn ensure_models(config: &AiConfig) -> Result<(), String> {
             url: "https://github.com/tokimo-lab/tokimo-ai-models/releases/download/v0.3.0/PP-OCRv5_mobile_rec.onnx",
             enabled: config.enable_ocr,
         },
+        // OCR models — Attention recognition (generated locally via export script)
+        // This model is NOT auto-downloaded — run scripts/export-attention-models.py
+        // to generate it from PaddleOCR SARNet weights.
         // Face models (InsightFace buffalo_l pack, publicly accessible)
         ModelFile {
             rel_path: "face/det_10g.onnx",

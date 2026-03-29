@@ -12,6 +12,7 @@ use crate::ocr_backend::{OcrBackend, PaddleOcrVariant};
 /// Known model identifiers.
 pub const MODEL_PP_OCRV5_MOBILE: &str = "pp-ocrv5-mobile";
 pub const MODEL_PP_OCRV5_SERVER: &str = "pp-ocrv5-server";
+pub const MODEL_PP_OCRV5_SERVER_ATTN: &str = "pp-ocrv5-server-attn";
 pub const MODEL_GOT_OCR_2: &str = "got-ocr-2";
 pub const MODEL_PP_CHATOCR_V3: &str = "pp-chatocr-v3";
 
@@ -44,6 +45,7 @@ impl OcrManager {
             HashMap::new();
         backends.insert(MODEL_PP_OCRV5_MOBILE, RwLock::new(None));
         backends.insert(MODEL_PP_OCRV5_SERVER, RwLock::new(None));
+        backends.insert(MODEL_PP_OCRV5_SERVER_ATTN, RwLock::new(None));
         // VLM models (GOT-OCR-2, PP-ChatOCR-v3) are handled via HTTP sidecar, not backends
         Self {
             models_dir,
@@ -141,6 +143,11 @@ impl OcrManager {
                 loaded: self.is_loaded(MODEL_PP_OCRV5_SERVER),
             },
             OcrModelInfo {
+                id: MODEL_PP_OCRV5_SERVER_ATTN,
+                display_name: "PP-OCRv5 Server (Attention)",
+                loaded: self.is_loaded(MODEL_PP_OCRV5_SERVER_ATTN),
+            },
+            OcrModelInfo {
                 id: MODEL_PP_OCRV5_MOBILE,
                 display_name: "PP-OCRv5 Mobile",
                 loaded: self.is_loaded(MODEL_PP_OCRV5_MOBILE),
@@ -201,6 +208,10 @@ impl OcrManager {
             MODEL_PP_OCRV5_SERVER => {
                 let svc =
                     crate::ocr::OcrService::new(&self.models_dir, PaddleOcrVariant::Server)?;
+                Ok(Arc::new(svc))
+            }
+            MODEL_PP_OCRV5_SERVER_ATTN => {
+                let svc = crate::ocr_attention::OcrAttentionService::new(&self.models_dir)?;
                 Ok(Arc::new(svc))
             }
             _ => Err(format!("Unknown OCR model: {model_name}")),

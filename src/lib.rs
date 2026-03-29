@@ -9,6 +9,7 @@ pub mod config;
 pub mod face;
 pub mod models;
 pub mod ocr;
+pub mod ocr_attention;
 pub mod ocr_backend;
 pub mod ocr_detector;
 pub mod ocr_manager;

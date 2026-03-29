@@ -246,11 +246,18 @@ async def ocr_hybrid(request: HybridOcrRequest) -> OcrResponse:
 def _merge_ocr_results(
     det_blocks: list[DetBlock], vlm_text: str
 ) -> list[OcrBlock]:
-    """Merge PP-OCRv5 detection coords with VLM text via sequential matching.
+    """Merge PP-OCRv5 detection boxes with VLM text via anchor-based alignment.
 
-    For each detection block, find the best-matching substring in the VLM text
-    starting from the current position. Both models read in the same spatial
-    order, so we advance linearly through the VLM text.
+    Uses ``difflib.SequenceMatcher.get_opcodes()`` to align the concatenated
+    detection texts against the full VLM output.  Each opcode maps a range of
+    det characters to a range of VLM characters; block boundaries (the ``\\n``
+    separators in det_concat) are used to split VLM text back to individual
+    bounding boxes.
+
+    Key improvement over the old sequential-scan algorithm: 'insert' opcodes
+    (characters VLM found but PP-OCR missed, e.g. ``+``) are attributed to the
+    correct bounding box using VLM newline context instead of being absorbed
+    by the next block.
     """
     import difflib
 
@@ -272,59 +279,141 @@ def _merge_ocr_results(
             for b in det_blocks
         ]
 
-    pos = 0  # Current position in VLM text
+    det_texts = [b.text.strip() for b in det_blocks]
+    sep = "\n"
+    det_concat = sep.join(det_texts)
+
+    # Block boundaries: (start, end) ranges in det_concat for each block
+    block_bounds: list[tuple[int, int]] = []
+    p = 0
+    for t in det_texts:
+        block_bounds.append((p, p + len(t)))
+        p += len(t) + len(sep)
+
+    # ── Alignment via SequenceMatcher ──
+    sm = difflib.SequenceMatcher(None, det_concat, vlm, autojunk=False)
+    opcodes = sm.get_opcodes()
+
+    block_vlm: list[list[str]] = [[] for _ in det_blocks]
+
+    def _find_block(dpos: int) -> int | None:
+        for i, (bs, be) in enumerate(block_bounds):
+            if bs <= dpos < be:
+                return i
+        return None
+
+    def _prev_block(dpos: int) -> int | None:
+        for i in range(len(block_bounds) - 1, -1, -1):
+            if block_bounds[i][1] <= dpos:
+                return i
+        return None
+
+    def _next_block(dpos: int) -> int | None:
+        for i, (bs, _) in enumerate(block_bounds):
+            if bs >= dpos:
+                return i
+        return None
+
+    for tag, di1, di2, vi1, vi2 in opcodes:
+        if tag == "delete":
+            continue
+
+        vlm_piece = vlm[vi1:vi2]
+
+        if tag == "equal":
+            # 1:1 character mapping — split precisely at block boundaries
+            for i, (bs, be) in enumerate(block_bounds):
+                os = max(di1, bs)
+                oe = min(di2, be)
+                if os < oe:
+                    block_vlm[i].append(
+                        vlm[vi1 + (os - di1) : vi1 + (oe - di1)]
+                    )
+
+        elif tag == "replace":
+            # Find blocks overlapping the det range
+            involved: list[tuple[int, int]] = []
+            for i, (bs, be) in enumerate(block_bounds):
+                overlap = max(0, min(di2, be) - max(di1, bs))
+                if overlap > 0:
+                    involved.append((i, overlap))
+
+            if len(involved) == 1:
+                block_vlm[involved[0][0]].append(vlm_piece)
+            elif involved:
+                # Split VLM text proportionally by overlap length
+                total = sum(o for _, o in involved)
+                vp = 0
+                for idx, (bi, overlap) in enumerate(involved):
+                    if idx == len(involved) - 1:
+                        block_vlm[bi].append(vlm_piece[vp:])
+                    else:
+                        n = round(len(vlm_piece) * overlap / total)
+                        block_vlm[bi].append(vlm_piece[vp : vp + n])
+                        vp += n
+
+        elif tag == "insert":
+            # VLM has extra text with no det counterpart.
+            bi = _find_block(di1)
+            at_block_start = bi is not None and di1 == block_bounds[bi][0]
+
+            if bi is not None and not at_block_start:
+                # Insert within a block interior — belongs to that block
+                block_vlm[bi].append(vlm_piece)
+                continue
+
+            # At a block boundary (separator or block start)
+            if at_block_start:
+                prev_bi = bi - 1 if bi > 0 else None
+                next_bi = bi
+            else:
+                prev_bi = _prev_block(di1)
+                next_bi = _next_block(di1)
+
+            if prev_bi is None and next_bi is None:
+                continue
+
+            # Use VLM context: check what character precedes this insert
+            preceded_by_nl = vi1 > 0 and vlm[vi1 - 1] == "\n"
+
+            if "\n" not in vlm_piece:
+                # No line breaks in the insert — stays on the same visual line
+                if preceded_by_nl and next_bi is not None:
+                    # After a newline → prefix of the next line
+                    block_vlm[next_bi].append(vlm_piece)
+                elif prev_bi is not None:
+                    # Continuation of the current line
+                    block_vlm[prev_bi].append(vlm_piece)
+                elif next_bi is not None:
+                    block_vlm[next_bi].append(vlm_piece)
+            else:
+                # Contains newlines — only keep text on the same visual line
+                # as an adjacent block; extra VLM-only lines are discarded
+                # (no PP-OCR bounding box available for them).
+                first_nl = vlm_piece.find("\n")
+                before = vlm_piece[:first_nl]
+                if before and not preceded_by_nl and prev_bi is not None:
+                    block_vlm[prev_bi].append(before)
+
+    # ── Build result with post-processing ──
     result: list[OcrBlock] = []
-
-    for block in det_blocks:
-        det = block.text.strip()
-        if not det or pos >= len(vlm):
-            result.append(_make_block(block, block.text))
-            continue
-
-        # Skip whitespace / newlines between blocks
-        while pos < len(vlm) and vlm[pos] in " \t\n\r":
-            pos += 1
-
-        if pos >= len(vlm):
-            result.append(_make_block(block, block.text))
-            continue
-
-        n = len(det)
-        max_end = min(len(vlm), pos + n * 3 + 30)
-
-        # Try different candidate lengths from current position
-        best_score = 0.0
-        best_len = n  # default: same length as detection
-        for try_len in range(max(1, n - 5), min(n + 15, max_end - pos + 1)):
-            candidate = vlm[pos : pos + try_len]
-            score = difflib.SequenceMatcher(
-                None, det, candidate, autojunk=False
-            ).ratio()
-            if score > best_score:
-                best_score = score
-                best_len = try_len
-
-        if best_score >= 0.3:
-            matched = vlm[pos : pos + best_len]
-            pos += best_len
-            result.append(_make_block(block, matched))
-        else:
-            # No good match — keep detection text, advance conservatively
-            pos += n
-            result.append(_make_block(block, det))
-
-    return [
-        OcrBlock(
-            text=_restore_word_spaces(b.text),
-            x=b.x,
-            y=b.y,
-            w=b.w,
-            h=b.h,
-            score=b.score,
-            paragraph_id=b.paragraph_id,
+    for i, block in enumerate(det_blocks):
+        text = "".join(block_vlm[i]).strip()
+        if not text:
+            text = block.text.strip()
+        text = _restore_word_spaces(text)
+        result.append(
+            OcrBlock(
+                text=text,
+                x=block.x,
+                y=block.y,
+                w=block.w,
+                h=block.h,
+                score=block.score,
+                paragraph_id=block.paragraph_id,
+            )
         )
-        for b in result
-    ]
+    return result
 
 
 def _make_block(block: DetBlock, text: str) -> OcrBlock:

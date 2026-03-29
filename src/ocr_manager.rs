@@ -281,6 +281,7 @@ async fn vlm_ocr_via_sidecar(
             w: b.w.map(|v| v as f32).unwrap_or(-1.0),
             h: b.h.map(|v| v as f32).unwrap_or(-1.0),
             paragraph_id: b.paragraph_id,
+            char_positions: None,
         })
         .collect())
 }
@@ -362,6 +363,7 @@ async fn hybrid_ocr_via_sidecar(
             w: b.w.map(|v| v as f32).unwrap_or(-1.0),
             h: b.h.map(|v| v as f32).unwrap_or(-1.0),
             paragraph_id: b.paragraph_id,
+            char_positions: None,
         })
         .collect();
 

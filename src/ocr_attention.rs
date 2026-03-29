@@ -19,7 +19,8 @@ use crate::ocr::OcrItem;
 use crate::ocr_backend::OcrBackend;
 use crate::ocr_detector::{self, OcrDetector, TextBox};
 
-static OCR_KEYS: &str = include_str!("../config/ppocr_keys_v5.txt");
+// PP-OCRv4 server rec uses the v1 dictionary (6623 chars, vocab_size = 6625)
+static OCR_KEYS: &str = include_str!("../config/ppocr_keys_v1.txt");
 
 /// Attention-based OCR recogniser.
 ///

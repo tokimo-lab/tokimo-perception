@@ -5,7 +5,7 @@ services:
     ports:
       - "5679:5679"
     volumes:
-      - ../../data/ai-models:/data/models
+      - ../../${DATA_LOCAL_PATH:-data}/ai-models:/data/models
     environment:
       - MODELS_DIR=/data/models
       - DEVICE=cpu

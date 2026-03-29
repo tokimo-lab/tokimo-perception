@@ -10,6 +10,7 @@ pub mod face;
 pub mod models;
 pub mod ocr;
 pub mod ocr_backend;
+pub mod ocr_detector;
 pub mod ocr_manager;
 pub mod stt;
 mod tokenizer;

@@ -28,6 +28,8 @@ pub struct OcrItem {
     pub y: f32,
     pub w: f32,
     pub h: f32,
+    /// Rotation angle in degrees (clockwise). 0 = horizontal text.
+    pub angle: f32,
     /// Paragraph group index assigned by spatial clustering.
     pub paragraph_id: u32,
     /// Character-level positions within the bounding box (original image pixel coords).
@@ -137,18 +139,17 @@ impl OcrService {
                     }
                     let rotated = self.detector.classify_and_rotate(&cropped)?;
 
-                    let min_x = rbox.corners.iter().map(|c| c.0).fold(f32::MAX, f32::min);
-                    let min_y = rbox.corners.iter().map(|c| c.1).fold(f32::MAX, f32::min);
-                    let max_x = rbox.corners.iter().map(|c| c.0).fold(f32::MIN, f32::max);
-                    let max_y = rbox.corners.iter().map(|c| c.1).fold(f32::MIN, f32::max);
+                    // Use the rotated rect's center/size/angle directly
                     let tbox = TextBox {
-                        x: min_x,
-                        y: min_y,
-                        w: max_x - min_x,
-                        h: max_y - min_y,
+                        x: rbox.center.0 - rbox.size.0 / 2.0,
+                        y: rbox.center.1 - rbox.size.1 / 2.0,
+                        w: rbox.size.0,
+                        h: rbox.size.1,
                     };
+                    let angle_deg = rbox.angle.to_degrees();
 
-                    if let Some(item) = self.recognize_text(&rotated, &tbox)? {
+                    if let Some(mut item) = self.recognize_text(&rotated, &tbox)? {
+                        item.angle = angle_deg;
                         results.push(item);
                     }
                 }
@@ -281,6 +282,7 @@ impl OcrService {
             y: bbox.y,
             w: bbox.w,
             h: bbox.h,
+            angle: 0.0,
             paragraph_id: 0,
             char_positions: Some(char_positions),
         }))

@@ -270,6 +270,7 @@ impl OcrTrocrService {
             y: bbox.y,
             w: bbox.w,
             h: bbox.h,
+            angle: 0.0,
             paragraph_id: 0,
             char_positions,
         }))

@@ -354,7 +354,7 @@ fn extract_boxes_from_prob_map(
     let threshold = 0.3f32;
     let box_threshold = 0.5f32;
     let min_size = 3;
-    let unclip_ratio = 1.6f32;
+    let unclip_ratio = 0.0f32;
 
     let mut binary = GrayImage::new(map_w as u32, map_h as u32);
     for y in 0..map_h {
@@ -525,7 +525,7 @@ fn extract_rotated_boxes(
     let threshold = 0.3f32;
     let box_thresh = 0.5f32;
     let min_size = 3usize;
-    let unclip_ratio = 1.6f32;
+    let unclip_ratio = 0.0f32;
     let max_candidates = 1000;
 
     let mut binary = GrayImage::new(map_w as u32, map_h as u32);

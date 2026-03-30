@@ -21,7 +21,7 @@ pub const MODEL_RAPID_OCR: &str = "rapid-ocr";
 pub const MODEL_RAPID_OCR_RUST: &str = "rapid-ocr-rust";
 
 /// Default model when none specified.
-pub const DEFAULT_MODEL: &str = MODEL_PP_OCRV5_SERVER;
+pub const DEFAULT_MODEL: &str = MODEL_RAPID_OCR_RUST;
 
 /// Models that do NOT provide bounding boxes (text-only output).
 const NO_BLOCK_MODELS: &[&str] = &[MODEL_GOT_OCR_2];
@@ -148,23 +148,28 @@ impl OcrManager {
     pub fn available_models(&self) -> Vec<OcrModelInfo> {
         vec![
             OcrModelInfo {
+                id: MODEL_RAPID_OCR_RUST,
+                display_name: "RapidOCR",
+                loaded: self.is_loaded(MODEL_RAPID_OCR_RUST),
+            },
+            OcrModelInfo {
                 id: MODEL_PP_OCRV5_SERVER,
                 display_name: "PP-OCRv5 Server",
                 loaded: self.is_loaded(MODEL_PP_OCRV5_SERVER),
             },
             OcrModelInfo {
                 id: MODEL_PP_OCRV5_SERVER_ATTN,
-                display_name: "PP-OCRv5 Server (Attention)",
+                display_name: "PP-OCRv5 Server Attention",
                 loaded: self.is_loaded(MODEL_PP_OCRV5_SERVER_ATTN),
             },
             OcrModelInfo {
                 id: MODEL_PARSEQ_ATTN,
-                display_name: "PARSeq (Attention, English)",
+                display_name: "PARSeq",
                 loaded: self.is_loaded(MODEL_PARSEQ_ATTN),
             },
             OcrModelInfo {
                 id: MODEL_TROCR_ZH_ATTN,
-                display_name: "TrOCR (Attention, Chinese)",
+                display_name: "TrOCR 中文",
                 loaded: self.is_loaded(MODEL_TROCR_ZH_ATTN),
             },
             OcrModelInfo {
@@ -173,24 +178,19 @@ impl OcrManager {
                 loaded: self.is_loaded(MODEL_PP_OCRV5_MOBILE),
             },
             OcrModelInfo {
+                id: MODEL_RAPID_OCR,
+                display_name: "RapidOCR",
+                loaded: self.is_loaded(MODEL_RAPID_OCR),
+            },
+            OcrModelInfo {
                 id: MODEL_GOT_OCR_2,
-                display_name: "GOT-OCR 2 (VLM sidecar)",
+                display_name: "GOT-OCR 2.0",
                 loaded: self.is_loaded(MODEL_GOT_OCR_2),
             },
             OcrModelInfo {
                 id: MODEL_PP_CHATOCR_V3,
-                display_name: "PP-ChatOCR v3 (VLM sidecar)",
+                display_name: "PP-ChatOCRv3",
                 loaded: self.is_loaded(MODEL_PP_CHATOCR_V3),
-            },
-            OcrModelInfo {
-                id: MODEL_RAPID_OCR,
-                display_name: "RapidOCR (sidecar)",
-                loaded: self.is_loaded(MODEL_RAPID_OCR),
-            },
-            OcrModelInfo {
-                id: MODEL_RAPID_OCR_RUST,
-                display_name: "RapidOCR (Rust)",
-                loaded: self.is_loaded(MODEL_RAPID_OCR_RUST),
             },
         ]
     }

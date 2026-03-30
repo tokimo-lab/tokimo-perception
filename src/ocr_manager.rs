@@ -17,6 +17,7 @@ pub const MODEL_PARSEQ_ATTN: &str = "parseq-attn";
 pub const MODEL_TROCR_ZH_ATTN: &str = "trocr-zh-attn";
 pub const MODEL_GOT_OCR_2: &str = "got-ocr-2";
 pub const MODEL_PP_CHATOCR_V3: &str = "pp-chatocr-v3";
+pub const MODEL_RAPID_OCR: &str = "rapid-ocr";
 
 /// Default model when none specified.
 pub const DEFAULT_MODEL: &str = MODEL_PP_OCRV5_SERVER;
@@ -65,7 +66,10 @@ impl OcrManager {
         self.last_use.store(crate::epoch_secs(), Ordering::Relaxed);
 
         // VLM models: call sidecar HTTP endpoint directly (async)
-        if matches!(model_name, MODEL_GOT_OCR_2 | MODEL_PP_CHATOCR_V3) {
+        if matches!(
+            model_name,
+            MODEL_GOT_OCR_2 | MODEL_PP_CHATOCR_V3 | MODEL_RAPID_OCR
+        ) {
             let sidecar_url = self.sidecar_url.as_deref().ok_or_else(|| {
                 format!(
                     "VLM OCR backend '{model_name}' requires OCR_SIDECAR_URL to be configured"
@@ -175,6 +179,11 @@ impl OcrManager {
                 id: MODEL_PP_CHATOCR_V3,
                 display_name: "PP-ChatOCR v3 (VLM sidecar)",
                 loaded: self.is_loaded(MODEL_PP_CHATOCR_V3),
+            },
+            OcrModelInfo {
+                id: MODEL_RAPID_OCR,
+                display_name: "RapidOCR (sidecar)",
+                loaded: self.is_loaded(MODEL_RAPID_OCR),
             },
         ]
     }

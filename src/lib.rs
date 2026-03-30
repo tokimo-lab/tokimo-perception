@@ -14,6 +14,7 @@ pub mod ocr_backend;
 pub mod ocr_detector;
 pub mod ocr_manager;
 pub mod ocr_parseq;
+pub mod ocr_trocr;
 pub mod stt;
 mod tokenizer;
 

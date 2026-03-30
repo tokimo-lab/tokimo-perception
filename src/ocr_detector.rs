@@ -49,7 +49,7 @@ impl OcrDetector {
     pub fn detect(&self, img: &DynamicImage) -> Result<Vec<TextBox>, String> {
         let (orig_w, orig_h) = (img.width() as f32, img.height() as f32);
 
-        let max_side = 1440.0f32;
+        let max_side = 2560.0f32;
         let scale = (max_side / orig_w.max(orig_h)).min(1.0);
         let new_w = ((orig_w * scale) as u32).max(32);
         let new_h = ((orig_h * scale) as u32).max(32);
@@ -133,11 +133,17 @@ impl OcrDetector {
 }
 
 /// Crop a text region from the original image using bounding box.
+/// Adds small padding to avoid clipping character edges.
 pub fn crop_text_region(img: &DynamicImage, bbox: &TextBox) -> DynamicImage {
-    let x = (bbox.x as u32).min(img.width().saturating_sub(1));
-    let y = (bbox.y as u32).min(img.height().saturating_sub(1));
-    let w = (bbox.w as u32).min(img.width() - x).max(1);
-    let h = (bbox.h as u32).min(img.height() - y).max(1);
+    let pad = 3u32;
+    let x = (bbox.x as u32).saturating_sub(pad).min(img.width().saturating_sub(1));
+    let y = (bbox.y as u32).saturating_sub(pad).min(img.height().saturating_sub(1));
+    let w = ((bbox.w as u32) + 2 * pad)
+        .min(img.width() - x)
+        .max(1);
+    let h = ((bbox.h as u32) + 2 * pad)
+        .min(img.height() - y)
+        .max(1);
     img.crop_imm(x, y, w, h)
 }
 
@@ -233,8 +239,9 @@ fn extract_boxes_from_prob_map(
     orig_h: f32,
 ) -> Vec<TextBox> {
     let threshold = 0.3f32;
-    let box_threshold = 0.6f32;
+    let box_threshold = 0.5f32;
     let min_size = 3;
+    let unclip_ratio = 1.6f32;
 
     let mut binary = GrayImage::new(map_w as u32, map_h as u32);
     for y in 0..map_h {
@@ -249,7 +256,7 @@ fn extract_boxes_from_prob_map(
         }
     }
 
-    let dilated = dilate_binary(&binary, 1);
+    let dilated = dilate_binary(&binary, 2);
     let components = find_connected_components(&dilated);
 
     let scale_x = orig_w / img_w as f32;
@@ -272,22 +279,42 @@ fn extract_boxes_from_prob_map(
             continue;
         }
 
+        // Score using only pixels above the threshold (avoids dilution from
+        // dilation-expanded low-probability pixels).
         let mut total = 0.0f32;
         let mut count = 0;
         for &(px, py) in &comp.pixels {
             let idx = py * map_w + px;
-            total += prob_data.get(idx).copied().unwrap_or(0.0);
-            count += 1;
+            let val = prob_data.get(idx).copied().unwrap_or(0.0);
+            if val > threshold {
+                total += val;
+                count += 1;
+            }
         }
         let score = if count > 0 { total / count as f32 } else { 0.0 };
         if score < box_threshold {
             continue;
         }
 
-        let x = min_x as f32 * scale_x;
-        let y = min_y as f32 * scale_y;
-        let w = box_w as f32 * scale_x;
-        let h = box_h as f32 * scale_y;
+        // Unclip expansion: expand bounding box proportionally to its size,
+        // mimicking PaddleOCR's Vatti polygon clipping (`unclip_ratio`).
+        let area = (box_w * box_h) as f32;
+        let perimeter = 2.0 * (box_w + box_h) as f32;
+        let expansion = if perimeter > 0.0 {
+            area * unclip_ratio / perimeter
+        } else {
+            0.0
+        };
+
+        let exp_x = (min_x as f32 - expansion).max(0.0);
+        let exp_y = (min_y as f32 - expansion).max(0.0);
+        let exp_w = (box_w as f32 + 2.0 * expansion).min(img_w as f32 - exp_x);
+        let exp_h = (box_h as f32 + 2.0 * expansion).min(img_h as f32 - exp_y);
+
+        let x = exp_x * scale_x;
+        let y = exp_y * scale_y;
+        let w = exp_w * scale_x;
+        let h = exp_h * scale_y;
 
         boxes.push(TextBox { x, y, w, h });
     }

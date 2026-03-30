@@ -15,6 +15,7 @@ from app.config import settings
 from app.models.base import BaseOcrModel
 from app.models.got_ocr import GotOcrModel
 from app.models.pp_chatocr import PpChatOcrModel
+from app.models.rapid_ocr import RapidOcrModel
 from app.schemas import (
     DetBlock,
     HealthResponse,
@@ -51,6 +52,10 @@ def _init_registry() -> None:
     chatocr = PpChatOcrModel()
     _registry[chatocr.model_id()] = chatocr
     logger.info("Registered model: %s", chatocr.model_id())
+
+    rapid = RapidOcrModel()
+    _registry[rapid.model_id()] = rapid
+    logger.info("Registered model: %s", rapid.model_id())
 
 
 # ── Lifespan ────────────────────────────────────────────────────

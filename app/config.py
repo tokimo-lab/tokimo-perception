@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     device: str = "auto"
     got_ocr_enabled: bool = True
     pp_chatocr_enabled: bool = False
+    rapid_ocr_enabled: bool = True
     host: str = "0.0.0.0"
     port: int = 5679
     log_level: str = "info"

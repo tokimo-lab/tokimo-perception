@@ -86,12 +86,8 @@ app = FastAPI(
 
 
 def _gpu_available() -> bool:
-    try:
-        import torch
-
-        return torch.cuda.is_available()
-    except ImportError:
-        return False
+    """Check GPU availability using the resolved device from settings."""
+    return settings.resolved_device == "cuda"
 
 
 def _get_model(model_id: str) -> BaseOcrModel:

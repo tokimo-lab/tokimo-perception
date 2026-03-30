@@ -12,6 +12,15 @@ use crate::ocr_detector::{self, OcrDetector, TextBox};
 
 static OCR_KEYS: &str = include_str!("../config/ppocr_keys_v5.txt");
 
+/// Detection strategy for text box extraction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetectionMode {
+    /// Connected component analysis with axis-aligned bounding boxes (original).
+    Components,
+    /// Contour-based detection with rotated bounding boxes (RapidOCR-style).
+    Contours,
+}
+
 pub struct OcrItem {
     pub text: String,
     pub score: f32,
@@ -33,10 +42,19 @@ pub struct OcrService {
     rec_session: Mutex<Session>,
     char_dict: Vec<String>,
     variant_name: String,
+    detection_mode: DetectionMode,
 }
 
 impl OcrService {
     pub fn new(models_dir: &str, variant: PaddleOcrVariant) -> Result<Self, String> {
+        Self::new_with_mode(models_dir, variant, DetectionMode::Components)
+    }
+
+    pub fn new_with_mode(
+        models_dir: &str,
+        variant: PaddleOcrVariant,
+        mode: DetectionMode,
+    ) -> Result<Self, String> {
         let (rec_name, variant_name) = match variant {
             PaddleOcrVariant::Mobile => (
                 "PP-OCRv5_mobile_rec.onnx",
@@ -73,6 +91,7 @@ impl OcrService {
             rec_session: Mutex::new(rec_session),
             char_dict,
             variant_name: variant_name.to_string(),
+            detection_mode: mode,
         })
     }
 
@@ -82,33 +101,62 @@ impl OcrService {
             return Err("Image too large".into());
         }
 
-        // Step 1: Text detection
-        let boxes = self.detector.detect(img)?;
-        if boxes.is_empty() {
-            return Ok(vec![]);
-        }
+        match self.detection_mode {
+            DetectionMode::Components => {
+                let boxes = self.detector.detect(img)?;
+                if boxes.is_empty() {
+                    return Ok(vec![]);
+                }
 
-        // Step 2 & 3: For each detected box, classify orientation and recognize text
-        let mut results = Vec::new();
-        for bbox in &boxes {
-            let cropped = ocr_detector::crop_text_region(img, bbox);
-            if cropped.width() < 2 || cropped.height() < 2 {
-                continue;
+                let mut results = Vec::new();
+                for bbox in &boxes {
+                    let cropped = ocr_detector::crop_text_region(img, bbox);
+                    if cropped.width() < 2 || cropped.height() < 2 {
+                        continue;
+                    }
+                    let rotated = self.detector.classify_and_rotate(&cropped)?;
+                    if let Some(item) = self.recognize_text(&rotated, bbox)? {
+                        results.push(item);
+                    }
+                }
+
+                ocr_detector::assign_paragraph_ids(&mut results);
+                Ok(results)
             }
+            DetectionMode::Contours => {
+                let rboxes = self.detector.detect_with_contours(img)?;
+                if rboxes.is_empty() {
+                    return Ok(vec![]);
+                }
 
-            // Classify text direction (0° or 180°)
-            let rotated = self.detector.classify_and_rotate(&cropped)?;
+                let mut results = Vec::new();
+                for rbox in &rboxes {
+                    let cropped = ocr_detector::crop_rotated_text_region(img, rbox);
+                    if cropped.width() < 2 || cropped.height() < 2 {
+                        continue;
+                    }
+                    let rotated = self.detector.classify_and_rotate(&cropped)?;
 
-            // Recognize text
-            if let Some(item) = self.recognize_text(&rotated, bbox)? {
-                results.push(item);
+                    let min_x = rbox.corners.iter().map(|c| c.0).fold(f32::MAX, f32::min);
+                    let min_y = rbox.corners.iter().map(|c| c.1).fold(f32::MAX, f32::min);
+                    let max_x = rbox.corners.iter().map(|c| c.0).fold(f32::MIN, f32::max);
+                    let max_y = rbox.corners.iter().map(|c| c.1).fold(f32::MIN, f32::max);
+                    let tbox = TextBox {
+                        x: min_x,
+                        y: min_y,
+                        w: max_x - min_x,
+                        h: max_y - min_y,
+                    };
+
+                    if let Some(item) = self.recognize_text(&rotated, &tbox)? {
+                        results.push(item);
+                    }
+                }
+
+                ocr_detector::assign_paragraph_ids(&mut results);
+                Ok(results)
             }
         }
-
-        // Step 4: Assign paragraph IDs via spatial clustering
-        ocr_detector::assign_paragraph_ids(&mut results);
-
-        Ok(results)
     }
 
     /// Recognize text from a cropped, oriented text region using CTC decoder.

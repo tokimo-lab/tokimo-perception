@@ -18,6 +18,7 @@ pub const MODEL_TROCR_ZH_ATTN: &str = "trocr-zh-attn";
 pub const MODEL_GOT_OCR_2: &str = "got-ocr-2";
 pub const MODEL_PP_CHATOCR_V3: &str = "pp-chatocr-v3";
 pub const MODEL_RAPID_OCR: &str = "rapid-ocr";
+pub const MODEL_RAPID_OCR_RUST: &str = "rapid-ocr-rust";
 
 /// Default model when none specified.
 pub const DEFAULT_MODEL: &str = MODEL_PP_OCRV5_SERVER;
@@ -51,6 +52,7 @@ impl OcrManager {
         backends.insert(MODEL_PP_OCRV5_SERVER_ATTN, RwLock::new(None));
         backends.insert(MODEL_PARSEQ_ATTN, RwLock::new(None));
         backends.insert(MODEL_TROCR_ZH_ATTN, RwLock::new(None));
+        backends.insert(MODEL_RAPID_OCR_RUST, RwLock::new(None));
         // VLM models (GOT-OCR-2, PP-ChatOCR-v3) are handled via HTTP sidecar, not backends
         Self {
             models_dir,
@@ -185,6 +187,11 @@ impl OcrManager {
                 display_name: "RapidOCR (sidecar)",
                 loaded: self.is_loaded(MODEL_RAPID_OCR),
             },
+            OcrModelInfo {
+                id: MODEL_RAPID_OCR_RUST,
+                display_name: "RapidOCR (Rust)",
+                loaded: self.is_loaded(MODEL_RAPID_OCR_RUST),
+            },
         ]
     }
 
@@ -243,6 +250,14 @@ impl OcrManager {
             }
             MODEL_TROCR_ZH_ATTN => {
                 let svc = crate::ocr_trocr::OcrTrocrService::new(&self.models_dir)?;
+                Ok(Arc::new(svc))
+            }
+            MODEL_RAPID_OCR_RUST => {
+                let svc = crate::ocr::OcrService::new_with_mode(
+                    &self.models_dir,
+                    PaddleOcrVariant::Server,
+                    crate::ocr::DetectionMode::Contours,
+                )?;
                 Ok(Arc::new(svc))
             }
             _ => Err(format!("Unknown OCR model: {model_name}")),

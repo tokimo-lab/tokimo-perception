@@ -585,16 +585,22 @@ fn extract_rotated_boxes(
             continue;
         }
 
-        // Use the min-area-rect corners for scoring and output.
-        // NOTE: fit_quad_to_hull() exists but is NOT used here because
-        // DBNet's binary mask does not preserve meaningful perspective
-        // geometry — the convex hull boundary noise produces random
-        // "perspective" directions.  Perspective editing is available
-        // in the frontend for manual correction.
-        let corners = rect_corners(center, (w, h), angle);
-
-        // Score: average probability inside the polygon (pre-binarisation map).
-        let score = box_score_fast(prob_data, map_w, map_h, &corners);
+        // Score: average probability of text pixels within the component.
+        // Only count pixels above the binarisation threshold to avoid dilution
+        // from dilation-expanded low-probability pixels (matches Components mode).
+        let score = {
+            let mut total = 0.0f32;
+            let mut count = 0u32;
+            for &(px, py) in &comp.pixels {
+                let idx = py * map_w + px;
+                let val = prob_data.get(idx).copied().unwrap_or(0.0);
+                if val > threshold {
+                    total += val;
+                    count += 1;
+                }
+            }
+            if count > 0 { total / count as f32 } else { 0.0 }
+        };
         if score < box_thresh {
             continue;
         }
@@ -873,6 +879,7 @@ fn order_points(mut corners: [(f32, f32); 4]) -> [(f32, f32); 4] {
 }
 
 /// Average probability inside a rotated quad (fast axis-aligned scan).
+#[allow(dead_code)]
 fn box_score_fast(
     prob_data: &[f32],
     map_w: usize,
@@ -926,6 +933,7 @@ fn box_score_fast(
 }
 
 /// Test whether a point lies inside a convex quadrilateral (winding test).
+#[allow(dead_code)]
 fn point_in_quad(p: (f32, f32), quad: &[(f32, f32); 4]) -> bool {
     let mut pos = 0u8;
     let mut neg = 0u8;

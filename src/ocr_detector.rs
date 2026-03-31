@@ -1045,7 +1045,9 @@ fn fit_quad_to_hull(hull: &[(f32, f32)]) -> Option<[(f32, f32); 4]> {
         return Some(order_points([hull[0], hull[1], hull[2], hull[3]]));
     }
 
-    // Compute exterior angle at each hull vertex.
+    // Compute exterior (turning) angle at each hull vertex.
+    // The exterior angle is the angle between consecutive edge directions;
+    // largest = sharpest corner, smallest = straightest edge.
     let mut angles: Vec<(f32, usize)> = Vec::with_capacity(n);
     for i in 0..n {
         let prev = hull[(i + n - 1) % n];
@@ -1060,7 +1062,11 @@ fn fit_quad_to_hull(hull: &[(f32, f32)]) -> Option<[(f32, f32); 4]> {
         let len_out = (d_out.0 * d_out.0 + d_out.1 * d_out.1).sqrt();
         let denom = len_in * len_out;
         let cos_val = if denom > 1e-8 { (dot / denom).clamp(-1.0, 1.0) } else { 1.0 };
-        let turning = std::f32::consts::PI - cos_val.acos();
+        // θ = acos(cos_val) is the angle between consecutive edge direction
+        // vectors d_in and d_out.  For a convex polygon vertex with interior
+        // angle α, θ = π − α, i.e. θ IS the exterior (turning) angle.
+        // Sharpest corners have the LARGEST θ.
+        let turning = cos_val.acos();
         angles.push((turning, i));
     }
 

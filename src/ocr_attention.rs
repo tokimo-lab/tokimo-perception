@@ -38,9 +38,22 @@ pub struct OcrAttentionService {
 
 impl OcrAttentionService {
     pub fn new(models_dir: &str) -> Result<Self, String> {
+        Self::with_max_side(models_dir, None)
+    }
+
+    pub fn with_max_side(models_dir: &str, det_max_side: Option<u32>) -> Result<Self, String> {
         let variant_name = "pp-ocrv5-server-attn";
-        let detector =
-            OcrDetector::new(models_dir, crate::ocr_backend::PaddleOcrVariant::Server)?;
+        let detector = match det_max_side {
+            Some(ms) => OcrDetector::with_max_side(
+                models_dir,
+                crate::ocr_backend::PaddleOcrVariant::Server,
+                ms,
+            )?,
+            None => OcrDetector::new(
+                models_dir,
+                crate::ocr_backend::PaddleOcrVariant::Server,
+            )?,
+        };
 
         let rec_path = format!("{models_dir}/ocr/PP-OCRv5_server_rec_attn.onnx");
         tracing::info!("Loading Attention OCR recognition model...");

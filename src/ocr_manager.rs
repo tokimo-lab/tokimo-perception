@@ -41,10 +41,20 @@ pub struct OcrManager {
     backends: HashMap<&'static str, RwLock<Option<Arc<dyn OcrBackend>>>>,
     sidecar_url: Option<String>,
     last_use: AtomicU64,
+    /// Detection resolution limit (longest side in pixels).
+    det_max_side: Option<u32>,
 }
 
 impl OcrManager {
     pub fn new(models_dir: String, sidecar_url: Option<String>) -> Self {
+        Self::with_max_side(models_dir, sidecar_url, None)
+    }
+
+    pub fn with_max_side(
+        models_dir: String,
+        sidecar_url: Option<String>,
+        det_max_side: Option<u32>,
+    ) -> Self {
         let mut backends: HashMap<&'static str, RwLock<Option<Arc<dyn OcrBackend>>>> =
             HashMap::new();
         backends.insert(MODEL_PP_OCRV5_MOBILE, RwLock::new(None));
@@ -59,6 +69,7 @@ impl OcrManager {
             backends,
             sidecar_url,
             last_use: AtomicU64::new(0),
+            det_max_side,
         }
     }
 
@@ -229,34 +240,47 @@ impl OcrManager {
     }
 
     fn create_backend(&self, model_name: &str) -> Result<Arc<dyn OcrBackend>, String> {
+        let ms = self.det_max_side;
         match model_name {
             MODEL_PP_OCRV5_MOBILE => {
-                let svc =
-                    crate::ocr::OcrService::new(&self.models_dir, PaddleOcrVariant::Mobile)?;
+                let svc = crate::ocr::OcrService::new_with_options(
+                    &self.models_dir,
+                    PaddleOcrVariant::Mobile,
+                    crate::ocr::DetectionMode::Components,
+                    ms,
+                )?;
                 Ok(Arc::new(svc))
             }
             MODEL_PP_OCRV5_SERVER => {
-                let svc =
-                    crate::ocr::OcrService::new(&self.models_dir, PaddleOcrVariant::Server)?;
+                let svc = crate::ocr::OcrService::new_with_options(
+                    &self.models_dir,
+                    PaddleOcrVariant::Server,
+                    crate::ocr::DetectionMode::Components,
+                    ms,
+                )?;
                 Ok(Arc::new(svc))
             }
             MODEL_PP_OCRV5_SERVER_ATTN => {
-                let svc = crate::ocr_attention::OcrAttentionService::new(&self.models_dir)?;
+                let svc =
+                    crate::ocr_attention::OcrAttentionService::with_max_side(&self.models_dir, ms)?;
                 Ok(Arc::new(svc))
             }
             MODEL_PARSEQ_ATTN => {
-                let svc = crate::ocr_parseq::OcrParseqService::new(&self.models_dir)?;
+                let svc =
+                    crate::ocr_parseq::OcrParseqService::with_max_side(&self.models_dir, ms)?;
                 Ok(Arc::new(svc))
             }
             MODEL_TROCR_ZH_ATTN => {
-                let svc = crate::ocr_trocr::OcrTrocrService::new(&self.models_dir)?;
+                let svc =
+                    crate::ocr_trocr::OcrTrocrService::with_max_side(&self.models_dir, ms)?;
                 Ok(Arc::new(svc))
             }
             MODEL_RAPID_OCR_RUST => {
-                let svc = crate::ocr::OcrService::new_with_mode(
+                let svc = crate::ocr::OcrService::new_with_options(
                     &self.models_dir,
                     PaddleOcrVariant::Server,
                     crate::ocr::DetectionMode::Contours,
+                    ms,
                 )?;
                 Ok(Arc::new(svc))
             }

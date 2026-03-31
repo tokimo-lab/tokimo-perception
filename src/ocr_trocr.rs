@@ -35,8 +35,21 @@ pub struct OcrTrocrService {
 
 impl OcrTrocrService {
     pub fn new(models_dir: &str) -> Result<Self, String> {
-        let detector =
-            OcrDetector::new(models_dir, crate::ocr_backend::PaddleOcrVariant::Server)?;
+        Self::with_max_side(models_dir, None)
+    }
+
+    pub fn with_max_side(models_dir: &str, det_max_side: Option<u32>) -> Result<Self, String> {
+        let detector = match det_max_side {
+            Some(ms) => OcrDetector::with_max_side(
+                models_dir,
+                crate::ocr_backend::PaddleOcrVariant::Server,
+                ms,
+            )?,
+            None => OcrDetector::new(
+                models_dir,
+                crate::ocr_backend::PaddleOcrVariant::Server,
+            )?,
+        };
 
         let enc_path = format!("{models_dir}/ocr/trocr_encoder.onnx");
         let dec_path = format!("{models_dir}/ocr/trocr_decoder.onnx");

@@ -52,13 +52,22 @@ pub struct OcrService {
 
 impl OcrService {
     pub fn new(models_dir: &str, variant: PaddleOcrVariant) -> Result<Self, String> {
-        Self::new_with_mode(models_dir, variant, DetectionMode::Components)
+        Self::new_with_options(models_dir, variant, DetectionMode::Components, None)
     }
 
     pub fn new_with_mode(
         models_dir: &str,
         variant: PaddleOcrVariant,
         mode: DetectionMode,
+    ) -> Result<Self, String> {
+        Self::new_with_options(models_dir, variant, mode, None)
+    }
+
+    pub fn new_with_options(
+        models_dir: &str,
+        variant: PaddleOcrVariant,
+        mode: DetectionMode,
+        det_max_side: Option<u32>,
     ) -> Result<Self, String> {
         let (rec_name, variant_name) = match variant {
             PaddleOcrVariant::Mobile => (
@@ -71,7 +80,10 @@ impl OcrService {
             ),
         };
 
-        let detector = OcrDetector::new(models_dir, variant)?;
+        let detector = match det_max_side {
+            Some(ms) => OcrDetector::with_max_side(models_dir, variant, ms)?,
+            None => OcrDetector::new(models_dir, variant)?,
+        };
 
         let rec_path = format!("{models_dir}/ocr/{rec_name}");
         tracing::info!("Loading OCR {variant_name} recognition model...");
@@ -88,8 +100,9 @@ impl OcrService {
         char_dict.push(" ".to_string());
 
         tracing::info!(
-            "OCR service ready: {variant_name} ({} characters).",
-            char_dict.len()
+            "OCR service ready: {variant_name} ({} characters), det_max_side={}.",
+            char_dict.len(),
+            det_max_side.unwrap_or(ocr_detector::DEFAULT_DET_MAX_SIDE),
         );
         Ok(Self {
             detector,

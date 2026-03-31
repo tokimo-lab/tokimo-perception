@@ -10,6 +10,10 @@ pub struct AiConfig {
     pub enable_stt: bool,
     /// Optional URL for the VLM OCR sidecar (GOT-OCR-2, PP-ChatOCR-v3).
     pub ocr_sidecar_url: Option<String>,
+    /// Detection resolution limit — longest image side in pixels.
+    /// `None` uses the built-in default (4096). Lower values speed up detection
+    /// at the cost of missing small text.
+    pub ocr_det_max_side: Option<u32>,
 }
 
 impl Default for AiConfig {
@@ -22,6 +26,7 @@ impl Default for AiConfig {
             enable_face: true,
             enable_stt: true,
             ocr_sidecar_url: None,
+            ocr_det_max_side: None,
         }
     }
 }

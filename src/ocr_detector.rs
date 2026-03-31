@@ -46,15 +46,29 @@ struct DetectionOutput {
     orig_h: f32,
 }
 
+/// Default detection resolution — longest side is capped to this value.
+pub const DEFAULT_DET_MAX_SIDE: u32 = 4096;
+
 /// Loads and holds the detection + classification ONNX sessions.
 /// Thread-safe via interior `Mutex` — designed to be wrapped in `Arc`.
 pub struct OcrDetector {
     det_session: Mutex<Session>,
     cls_session: Mutex<Session>,
+    /// Maximum pixel length for the longest side during detection.
+    /// Images larger than this are downscaled proportionally.
+    det_max_side: f32,
 }
 
 impl OcrDetector {
     pub fn new(models_dir: &str, variant: PaddleOcrVariant) -> Result<Self, String> {
+        Self::with_max_side(models_dir, variant, DEFAULT_DET_MAX_SIDE)
+    }
+
+    pub fn with_max_side(
+        models_dir: &str,
+        variant: PaddleOcrVariant,
+        det_max_side: u32,
+    ) -> Result<Self, String> {
         let det_name = match variant {
             PaddleOcrVariant::Mobile => "PP-OCRv5_mobile_det.onnx",
             PaddleOcrVariant::Server => "PP-OCRv5_server_det.onnx",
@@ -68,6 +82,7 @@ impl OcrDetector {
         Ok(Self {
             det_session: Mutex::new(det_session),
             cls_session: Mutex::new(cls_session),
+            det_max_side: det_max_side as f32,
         })
     }
 
@@ -75,7 +90,7 @@ impl OcrDetector {
     fn run_dbnet(&self, img: &DynamicImage) -> Result<DetectionOutput, String> {
         let (orig_w, orig_h) = (img.width() as f32, img.height() as f32);
 
-        let max_side = 2560.0f32;
+        let max_side = self.det_max_side;
         let scale = (max_side / orig_w.max(orig_h)).min(1.0);
         let new_w = ((orig_w * scale) as u32).max(32);
         let new_h = ((orig_h * scale) as u32).max(32);

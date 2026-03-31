@@ -223,9 +223,10 @@ impl AiService {
         let manager = self
             .ocr_manager
             .get_or_try_init(|| async {
-                Ok::<_, String>(ocr_manager::OcrManager::new(
+                Ok::<_, String>(ocr_manager::OcrManager::with_max_side(
                     self.config.models_dir.clone(),
                     self.config.ocr_sidecar_url.clone(),
+                    self.config.ocr_det_max_side,
                 ))
             })
             .await?;
@@ -248,9 +249,10 @@ impl AiService {
         let manager = self
             .ocr_manager
             .get_or_try_init(|| async {
-                Ok::<_, String>(ocr_manager::OcrManager::new(
+                Ok::<_, String>(ocr_manager::OcrManager::with_max_side(
                     self.config.models_dir.clone(),
                     self.config.ocr_sidecar_url.clone(),
+                    self.config.ocr_det_max_side,
                 ))
             })
             .await?;

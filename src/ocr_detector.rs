@@ -578,15 +578,17 @@ fn extract_rotated_boxes(
             continue;
         }
 
-        // Minimum area rotated rectangle.
+        // Minimum area rotated rectangle (still needed for scoring and size checks).
         let (center, (w, h), angle) = min_area_rect(&hull);
         let short_side = w.min(h);
         if short_side < min_size as f32 {
             continue;
         }
 
-        // Corner points of the rotated rect.
-        let corners = rect_corners(center, (w, h), angle);
+        // Fit a perspective quad to the hull (captures actual contour shape).
+        // Falls back to the rotated rectangle if the hull has < 4 vertices.
+        let corners = fit_quad_to_hull(&hull)
+            .unwrap_or_else(|| rect_corners(center, (w, h), angle));
 
         // Score: average probability inside the polygon (pre-binarisation map).
         let score = box_score_fast(prob_data, map_w, map_h, &corners);
@@ -594,7 +596,7 @@ fn extract_rotated_boxes(
             continue;
         }
 
-        // Unclip: expand the rotated rect.
+        // Unclip: expand the quad outward.
         let area = w * h;
         let perimeter = 2.0 * (w + h);
         let distance = if perimeter > 0.0 {
@@ -602,20 +604,16 @@ fn extract_rotated_boxes(
         } else {
             0.0
         };
-        let new_w = w + 2.0 * distance;
-        let new_h = h + 2.0 * distance;
 
-        if new_w.min(new_h) < (min_size + 2) as f32 {
-            continue;
-        }
+        // Expand the quad by offsetting each edge outward.
+        let expanded = unclip_quad(&corners, distance);
 
-        // Recompute corners from expanded rect, then scale to original coords.
-        let exp_corners = rect_corners(center, (new_w, new_h), angle);
+        // Scale to original image coordinates.
         let scaled: [(f32, f32); 4] = [
-            (exp_corners[0].0 * scale_x, exp_corners[0].1 * scale_y),
-            (exp_corners[1].0 * scale_x, exp_corners[1].1 * scale_y),
-            (exp_corners[2].0 * scale_x, exp_corners[2].1 * scale_y),
-            (exp_corners[3].0 * scale_x, exp_corners[3].1 * scale_y),
+            (expanded[0].0 * scale_x, expanded[0].1 * scale_y),
+            (expanded[1].0 * scale_x, expanded[1].1 * scale_y),
+            (expanded[2].0 * scale_x, expanded[2].1 * scale_y),
+            (expanded[3].0 * scale_x, expanded[3].1 * scale_y),
         ];
 
         let ordered = order_points(scaled);
@@ -1032,6 +1030,111 @@ fn dist_f32(a: (f32, f32), b: (f32, f32)) -> f32 {
     let dx = b.0 - a.0;
     let dy = b.1 - a.1;
     (dx * dx + dy * dy).sqrt()
+}
+
+/// Fit a quadrilateral to a convex hull by selecting the 4 vertices with the
+/// largest exterior (turning) angles. These are the "sharpest corners" and
+/// naturally capture perspective distortion that `minAreaRect` discards.
+/// Returns [TL, TR, BR, BL] via `order_points`.
+fn fit_quad_to_hull(hull: &[(f32, f32)]) -> Option<[(f32, f32); 4]> {
+    let n = hull.len();
+    if n < 4 {
+        return None;
+    }
+    if n == 4 {
+        return Some(order_points([hull[0], hull[1], hull[2], hull[3]]));
+    }
+
+    // Compute exterior angle at each hull vertex.
+    let mut angles: Vec<(f32, usize)> = Vec::with_capacity(n);
+    for i in 0..n {
+        let prev = hull[(i + n - 1) % n];
+        let curr = hull[i];
+        let next = hull[(i + 1) % n];
+
+        let d_in = (curr.0 - prev.0, curr.1 - prev.1);
+        let d_out = (next.0 - curr.0, next.1 - curr.1);
+
+        let dot = d_in.0 * d_out.0 + d_in.1 * d_out.1;
+        let len_in = (d_in.0 * d_in.0 + d_in.1 * d_in.1).sqrt();
+        let len_out = (d_out.0 * d_out.0 + d_out.1 * d_out.1).sqrt();
+        let denom = len_in * len_out;
+        let cos_val = if denom > 1e-8 { (dot / denom).clamp(-1.0, 1.0) } else { 1.0 };
+        let turning = std::f32::consts::PI - cos_val.acos();
+        angles.push((turning, i));
+    }
+
+    // Pick the 4 vertices with the largest turning angle.
+    angles.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut indices: Vec<usize> = angles.iter().take(4).map(|&(_, idx)| idx).collect();
+    // Sort by position on the hull to preserve winding order.
+    indices.sort();
+
+    Some(order_points([
+        hull[indices[0]],
+        hull[indices[1]],
+        hull[indices[2]],
+        hull[indices[3]],
+    ]))
+}
+
+/// Expand a quad outward by `distance` along each edge's outward normal.
+/// Uses polygon edge offset with line-line intersection for new corners.
+/// Quad must be in [TL, TR, BR, BL] order (clockwise in image coords).
+fn unclip_quad(quad: &[(f32, f32); 4], distance: f32) -> [(f32, f32); 4] {
+    let n = 4usize;
+    // For each edge, compute the offset edge (shifted outward by `distance`).
+    // CW winding → outward normal of edge (a, b) is (dy, -dx) / len.
+    let mut offset_edges: Vec<((f32, f32), (f32, f32))> = Vec::with_capacity(n);
+    for i in 0..n {
+        let a = quad[i];
+        let b = quad[(i + 1) % n];
+        let dx = b.0 - a.0;
+        let dy = b.1 - a.1;
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 1e-8 {
+            offset_edges.push((a, b));
+            continue;
+        }
+        let nx = dy / len * distance;
+        let ny = -dx / len * distance;
+        offset_edges.push(((a.0 + nx, a.1 + ny), (b.0 + nx, b.1 + ny)));
+    }
+
+    // New corners = intersection of adjacent offset edges.
+    let mut result = [(0.0f32, 0.0f32); 4];
+    for i in 0..n {
+        let prev = (i + n - 1) % n;
+        if let Some(pt) = line_intersect(
+            offset_edges[prev].0,
+            offset_edges[prev].1,
+            offset_edges[i].0,
+            offset_edges[i].1,
+        ) {
+            result[i] = pt;
+        } else {
+            // Fallback: use the offset endpoint
+            result[i] = offset_edges[i].0;
+        }
+    }
+    result
+}
+
+/// Intersection of two lines (each defined by two points).
+fn line_intersect(
+    a1: (f32, f32),
+    a2: (f32, f32),
+    b1: (f32, f32),
+    b2: (f32, f32),
+) -> Option<(f32, f32)> {
+    let d1 = (a2.0 - a1.0, a2.1 - a1.1);
+    let d2 = (b2.0 - b1.0, b2.1 - b1.1);
+    let cross = d1.0 * d2.1 - d1.1 * d2.0;
+    if cross.abs() < 1e-8 {
+        return None; // parallel
+    }
+    let t = ((b1.0 - a1.0) * d2.1 - (b1.1 - a1.1) * d2.0) / cross;
+    Some((a1.0 + t * d1.0, a1.1 + t * d1.1))
 }
 
 fn load_session(path: &str) -> Result<Session, String> {

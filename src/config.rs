@@ -14,6 +14,10 @@ pub struct AiConfig {
     /// `None` uses the built-in default (4096). Lower values speed up detection
     /// at the cost of missing small text.
     pub ocr_det_max_side: Option<u32>,
+    /// Enable CUDA GPU acceleration for ONNX Runtime models.
+    /// Requires a GPU-enabled libonnxruntime, CUDA toolkit, and cuDNN.
+    /// Falls back to CPU if unavailable.
+    pub enable_cuda: bool,
 }
 
 impl Default for AiConfig {
@@ -27,6 +31,9 @@ impl Default for AiConfig {
             enable_stt: true,
             ocr_sidecar_url: None,
             ocr_det_max_side: None,
+            enable_cuda: std::env::var("AI_ENABLE_CUDA")
+                .map(|v| !matches!(v.to_lowercase().as_str(), "false" | "0" | "no"))
+                .unwrap_or(true),
         }
     }
 }

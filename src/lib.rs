@@ -57,6 +57,23 @@ pub struct AiService {
 
 impl AiService {
     pub fn new(config: AiConfig) -> Arc<Self> {
+        // Initialize ONNX Runtime environment with execution providers.
+        // Must be called before any Session is created. Only the first call
+        // takes effect; subsequent calls are no-ops.
+        if config.enable_cuda {
+            let applied = ort::init()
+                .with_execution_providers([ort::ep::CUDA::default().build()])
+                .commit();
+            if applied {
+                tracing::info!("ONNX Runtime initialized with CUDA execution provider");
+            }
+        } else {
+            let applied = ort::init().commit();
+            if applied {
+                tracing::info!("ONNX Runtime initialized (CPU only)");
+            }
+        }
+
         Arc::new(Self {
             config,
             ocr_manager: OnceCell::new(),

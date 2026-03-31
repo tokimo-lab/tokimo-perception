@@ -12,7 +12,10 @@ pub mod models;
 /// Snapshot of AI service status for the system-info API.
 #[derive(Debug, Clone)]
 pub struct AiStatus {
+    /// Whether CUDA was requested in config.
     pub cuda_enabled: bool,
+    /// Whether CUDA actually works at runtime (set after first model load attempt).
+    pub cuda_working: bool,
     pub ocr_loaded: bool,
     pub clip_loaded: bool,
     pub face_loaded: bool,
@@ -29,7 +32,7 @@ pub mod stt;
 mod tokenizer;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use config::AiConfig;
@@ -37,6 +40,52 @@ use tokio::sync::{OnceCell, RwLock};
 
 /// How long an idle model stays in memory before eviction.
 const MODEL_IDLE_TIMEOUT: Duration = Duration::from_secs(180); // 3 minutes
+
+/// Tracks whether CUDA actually works at runtime (set on first session creation attempt).
+/// `true`  = CUDA EP succeeded at least once → keep trying CUDA for new sessions.
+/// `false` = CUDA EP failed → skip CUDA for all subsequent sessions (avoid repeated errors).
+static CUDA_WORKS: AtomicBool = AtomicBool::new(true); // optimistic default
+
+/// Whether CUDA was requested in config (set once at init).
+static CUDA_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Build an ONNX Runtime session from a model file.
+/// If CUDA is enabled, tries CUDA first; on failure, falls back to CPU
+/// and disables CUDA for all future sessions.
+pub fn build_session(path: impl AsRef<std::path::Path>) -> ort::Result<ort::session::Session> {
+    use ort::session::Session;
+
+    let path = path.as_ref();
+    let want_cuda =
+        CUDA_REQUESTED.load(Ordering::Relaxed) && CUDA_WORKS.load(Ordering::Relaxed);
+
+    if want_cuda {
+        match Session::builder()?
+            .with_execution_providers([ort::ep::CUDA::default().build()])?
+            .commit_from_file(path)
+        {
+            Ok(session) => {
+                tracing::info!("Loaded model with CUDA: {}", path.display());
+                return Ok(session);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "CUDA failed for {}: {e} — falling back to CPU for all models",
+                    path.display()
+                );
+                CUDA_WORKS.store(false, Ordering::Relaxed);
+            }
+        }
+    }
+
+    // CPU-only fallback
+    Session::builder()?.commit_from_file(path)
+}
+
+/// Returns whether CUDA is actually working at runtime (not just requested).
+pub fn is_cuda_working() -> bool {
+    CUDA_WORKS.load(Ordering::Relaxed)
+}
 
 /// Epoch-based timestamp (seconds since an arbitrary point).
 fn epoch_secs() -> u64 {
@@ -67,19 +116,18 @@ pub struct AiService {
 
 impl AiService {
     pub fn new(config: AiConfig) -> Arc<Self> {
-        // Initialize ONNX Runtime environment with execution providers.
-        // Must be called before any Session is created. Only the first call
-        // takes effect; subsequent calls are no-ops.
-        if config.enable_cuda {
-            let applied = ort::init()
-                .with_execution_providers([ort::ep::CUDA::default().build()])
-                .commit();
-            if applied {
-                tracing::info!("ONNX Runtime initialized with CUDA execution provider");
-            }
-        } else {
-            let applied = ort::init().commit();
-            if applied {
+        // Store CUDA preference in global for build_session() to read.
+        CUDA_REQUESTED.store(config.enable_cuda, Ordering::Relaxed);
+
+        // Initialize ONNX Runtime environment (CPU only at global level).
+        // CUDA is applied per-session via build_session() with automatic fallback.
+        let applied = ort::init().commit();
+        if applied {
+            if config.enable_cuda {
+                tracing::info!(
+                    "ONNX Runtime initialized (CUDA will be attempted per-session)"
+                );
+            } else {
                 tracing::info!("ONNX Runtime initialized (CPU only)");
             }
         }
@@ -192,6 +240,7 @@ impl AiService {
     pub fn status(&self) -> AiStatus {
         AiStatus {
             cuda_enabled: self.config.enable_cuda,
+            cuda_working: self.config.enable_cuda && is_cuda_working(),
             ocr_loaded: self.ocr_manager.get().is_some_and(|m| m.has_loaded_backends()),
             clip_loaded: self.clip.try_read().is_ok_and(|g| g.is_some()),
             face_loaded: self.face.try_read().is_ok_and(|g| g.is_some()),

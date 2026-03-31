@@ -49,9 +49,7 @@ impl OcrParseqService {
 
         let rec_path = format!("{models_dir}/ocr/parseq_rec.onnx");
         tracing::info!("Loading PARSeq recognition model from {rec_path}");
-        let rec_session = Session::builder()
-            .map_err(|e| format!("Session builder: {e}"))?
-            .commit_from_file(&rec_path)
+        let rec_session = crate::build_session(&rec_path)
             .map_err(|e| format!("Load PARSeq model {rec_path}: {e}"))?;
 
         let charset: Vec<char> = PARSEQ_CHARSET

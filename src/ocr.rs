@@ -324,8 +324,5 @@ impl OcrBackend for OcrService {
 }
 
 fn load_session(path: &str) -> Result<Session, String> {
-    Session::builder()
-        .map_err(|e| format!("Session builder: {e}"))?
-        .commit_from_file(path)
-        .map_err(|e| format!("Load model {path}: {e}"))
+    crate::build_session(path).map_err(|e| format!("Load model {path}: {e}"))
 }

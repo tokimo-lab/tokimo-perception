@@ -243,6 +243,7 @@ impl OcrAttentionService {
             w: bbox.w,
             h: bbox.h,
             angle: 0.0,
+            corners: None,
             paragraph_id: 0,
             char_positions,
         }))

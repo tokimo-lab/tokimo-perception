@@ -30,6 +30,9 @@ pub struct OcrItem {
     pub h: f32,
     /// Rotation angle in degrees (clockwise). 0 = horizontal text.
     pub angle: f32,
+    /// 4 corner points [TL, TR, BR, BL] in original image coords.
+    /// Present when detected via contour mode; `None` for legacy/sidecar results.
+    pub corners: Option<[(f32, f32); 4]>,
     /// Paragraph group index assigned by spatial clustering.
     pub paragraph_id: u32,
     /// Character-level positions within the bounding box (original image pixel coords).
@@ -150,6 +153,7 @@ impl OcrService {
 
                     if let Some(mut item) = self.recognize_text(&rotated, &tbox)? {
                         item.angle = angle_deg;
+                        item.corners = Some(rbox.corners);
                         results.push(item);
                     }
                 }
@@ -283,6 +287,7 @@ impl OcrService {
             w: bbox.w,
             h: bbox.h,
             angle: 0.0,
+            corners: None,
             paragraph_id: 0,
             char_positions: Some(char_positions),
         }))

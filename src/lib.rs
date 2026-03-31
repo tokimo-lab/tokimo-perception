@@ -56,8 +56,69 @@ pub fn build_session(path: impl AsRef<std::path::Path>) -> ort::Result<ort::sess
     }
 }
 
-/// Whether CUDA was requested in config (set once at init).
+/// Whether CUDA was enabled after auto-detection (set once at init).
 static ENABLE_CUDA: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Detect whether the CUDA environment is ready for ONNX Runtime.
+/// Checks: (1) ORT CUDA provider .so exists, (2) required CUDA runtime libs are installed.
+fn detect_cuda_environment() -> bool {
+    // 1. Check ORT CUDA provider shared library
+    let ort_path = match std::env::var("ORT_DYLIB_PATH") {
+        Ok(p) => p,
+        Err(_) => {
+            tracing::debug!("CUDA detection: ORT_DYLIB_PATH not set");
+            return false;
+        }
+    };
+    let ort_dir = std::path::Path::new(&ort_path)
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    if !ort_dir.join("libonnxruntime_providers_cuda.so").exists() {
+        tracing::debug!("CUDA detection: libonnxruntime_providers_cuda.so not found");
+        return false;
+    }
+
+    // 2. Check required CUDA runtime libraries (ORT 1.24.x)
+    let required = [
+        "libcudart.so.12",
+        "libcublas.so.12",
+        "libcublasLt.so.12",
+        "libcufft.so.11",
+        "libcurand.so.10",
+        "libcudnn.so.9",
+    ];
+    let lib_dirs = [
+        "/usr/lib/x86_64-linux-gnu",
+        "/lib/x86_64-linux-gnu",
+        "/usr/local/cuda/lib64",
+        "/usr/local/cuda-12/lib64",
+        "/usr/local/cuda-12/targets/x86_64-linux/lib",
+    ];
+    let ldconfig = std::process::Command::new("ldconfig")
+        .arg("-p")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+
+    for lib in required {
+        let found = ldconfig.contains(lib)
+            || lib_dirs
+                .iter()
+                .any(|dir| std::path::Path::new(dir).join(lib).exists());
+        if !found {
+            tracing::debug!("CUDA detection: {lib} not found");
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Returns whether CUDA is enabled (auto-detected at init).
+pub fn is_cuda_enabled() -> bool {
+    ENABLE_CUDA.load(Ordering::Relaxed)
+}
 
 /// Epoch-based timestamp (seconds since an arbitrary point).
 fn epoch_secs() -> u64 {
@@ -88,15 +149,20 @@ pub struct AiService {
 
 impl AiService {
     pub fn new(config: AiConfig) -> Arc<Self> {
-        // Store CUDA preference in global for build_session() to read.
-        ENABLE_CUDA.store(config.enable_cuda, Ordering::Relaxed);
+        // Auto-detect CUDA: user wants it AND environment supports it.
+        let use_cuda = config.enable_cuda && detect_cuda_environment();
+        ENABLE_CUDA.store(use_cuda, Ordering::Relaxed);
 
         // Initialize ONNX Runtime environment (CPU only at global level).
         // CUDA EP is applied per-session in build_session().
         let applied = ort::init().commit();
         if applied {
-            if config.enable_cuda {
+            if use_cuda {
                 tracing::info!("ONNX Runtime initialized (CUDA enabled per-session)");
+            } else if config.enable_cuda {
+                tracing::info!(
+                    "ONNX Runtime initialized (CUDA requested but environment not ready, using CPU)"
+                );
             } else {
                 tracing::info!("ONNX Runtime initialized (CPU only)");
             }

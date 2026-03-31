@@ -15,8 +15,8 @@ pub struct AiConfig {
     /// at the cost of missing small text.
     pub ocr_det_max_side: Option<u32>,
     /// Enable CUDA GPU acceleration for ONNX Runtime models.
-    /// Requires a GPU-enabled libonnxruntime, CUDA toolkit, and cuDNN.
-    /// Falls back to CPU if unavailable.
+    /// When true, init auto-detects whether the CUDA environment is ready
+    /// (provider lib + runtime deps); if not, silently uses CPU.
     pub enable_cuda: bool,
 }
 

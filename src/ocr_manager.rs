@@ -212,6 +212,13 @@ impl OcrManager {
             .is_some_and(|slot| slot.try_read().is_ok_and(|g| g.is_some()))
     }
 
+    /// Whether any OCR backend is currently loaded in memory.
+    pub fn has_loaded_backends(&self) -> bool {
+        self.backends
+            .values()
+            .any(|slot| slot.try_read().is_ok_and(|g| g.is_some()))
+    }
+
     async fn get_or_init_backend(
         &self,
         model_name: &str,

@@ -8,6 +8,16 @@ pub mod clip;
 pub mod config;
 pub mod face;
 pub mod models;
+
+/// Snapshot of AI service status for the system-info API.
+#[derive(Debug, Clone)]
+pub struct AiStatus {
+    pub cuda_enabled: bool,
+    pub ocr_loaded: bool,
+    pub clip_loaded: bool,
+    pub face_loaded: bool,
+    pub stt_loaded: bool,
+}
 pub mod ocr;
 pub mod ocr_attention;
 pub mod ocr_backend;
@@ -176,6 +186,17 @@ impl AiService {
 
     pub fn models_dir(&self) -> &str {
         &self.config.models_dir
+    }
+
+    /// Report current AI service status for the system-info API.
+    pub fn status(&self) -> AiStatus {
+        AiStatus {
+            cuda_enabled: self.config.enable_cuda,
+            ocr_loaded: self.ocr_manager.get().is_some_and(|m| m.has_loaded_backends()),
+            clip_loaded: self.clip.try_read().is_ok_and(|g| g.is_some()),
+            face_loaded: self.face.try_read().is_ok_and(|g| g.is_some()),
+            stt_loaded: self.stt.try_read().is_ok_and(|g| g.is_some()),
+        }
     }
 
     // ── Feature toggles ──────────────────────────────────────────────────

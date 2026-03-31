@@ -585,10 +585,13 @@ fn extract_rotated_boxes(
             continue;
         }
 
-        // Fit a perspective quad to the hull (captures actual contour shape).
-        // Falls back to the rotated rectangle if the hull has < 4 vertices.
-        let corners = fit_quad_to_hull(&hull)
-            .unwrap_or_else(|| rect_corners(center, (w, h), angle));
+        // Use the min-area-rect corners for scoring and output.
+        // NOTE: fit_quad_to_hull() exists but is NOT used here because
+        // DBNet's binary mask does not preserve meaningful perspective
+        // geometry — the convex hull boundary noise produces random
+        // "perspective" directions.  Perspective editing is available
+        // in the frontend for manual correction.
+        let corners = rect_corners(center, (w, h), angle);
 
         // Score: average probability inside the polygon (pre-binarisation map).
         let score = box_score_fast(prob_data, map_w, map_h, &corners);
@@ -596,7 +599,7 @@ fn extract_rotated_boxes(
             continue;
         }
 
-        // Unclip: expand the quad outward.
+        // Unclip: expand the rect outward.
         let area = w * h;
         let perimeter = 2.0 * (w + h);
         let distance = if perimeter > 0.0 {
@@ -605,15 +608,20 @@ fn extract_rotated_boxes(
             0.0
         };
 
-        // Expand the quad by offsetting each edge outward.
-        let expanded = unclip_quad(&corners, distance);
+        let new_w = w + 2.0 * distance;
+        let new_h = h + 2.0 * distance;
 
-        // Scale to original image coordinates.
+        if new_w.min(new_h) < (min_size + 2) as f32 {
+            continue;
+        }
+
+        // Recompute corners from expanded rect, then scale to original coords.
+        let exp_corners = rect_corners(center, (new_w, new_h), angle);
         let scaled: [(f32, f32); 4] = [
-            (expanded[0].0 * scale_x, expanded[0].1 * scale_y),
-            (expanded[1].0 * scale_x, expanded[1].1 * scale_y),
-            (expanded[2].0 * scale_x, expanded[2].1 * scale_y),
-            (expanded[3].0 * scale_x, expanded[3].1 * scale_y),
+            (exp_corners[0].0 * scale_x, exp_corners[0].1 * scale_y),
+            (exp_corners[1].0 * scale_x, exp_corners[1].1 * scale_y),
+            (exp_corners[2].0 * scale_x, exp_corners[2].1 * scale_y),
+            (exp_corners[3].0 * scale_x, exp_corners[3].1 * scale_y),
         ];
 
         let ordered = order_points(scaled);
@@ -1036,6 +1044,10 @@ fn dist_f32(a: (f32, f32), b: (f32, f32)) -> f32 {
 /// largest exterior (turning) angles. These are the "sharpest corners" and
 /// naturally capture perspective distortion that `minAreaRect` discards.
 /// Returns [TL, TR, BR, BL] via `order_points`.
+///
+/// NOTE: Currently unused — DBNet's binary mask does not preserve reliable
+/// perspective geometry.  Kept for future use with edge-based detection.
+#[allow(dead_code)]
 fn fit_quad_to_hull(hull: &[(f32, f32)]) -> Option<[(f32, f32); 4]> {
     let n = hull.len();
     if n < 4 {
@@ -1087,6 +1099,9 @@ fn fit_quad_to_hull(hull: &[(f32, f32)]) -> Option<[(f32, f32); 4]> {
 /// Expand a quad outward by `distance` along each edge's outward normal.
 /// Uses polygon edge offset with line-line intersection for new corners.
 /// Quad must be in [TL, TR, BR, BL] order (clockwise in image coords).
+///
+/// NOTE: Currently unused — see `fit_quad_to_hull` note.
+#[allow(dead_code)]
 fn unclip_quad(quad: &[(f32, f32); 4], distance: f32) -> [(f32, f32); 4] {
     let n = 4usize;
     // For each edge, compute the offset edge (shifted outward by `distance`).
@@ -1127,6 +1142,7 @@ fn unclip_quad(quad: &[(f32, f32); 4], distance: f32) -> [(f32, f32); 4] {
 }
 
 /// Intersection of two lines (each defined by two points).
+#[allow(dead_code)]
 fn line_intersect(
     a1: (f32, f32),
     a2: (f32, f32),

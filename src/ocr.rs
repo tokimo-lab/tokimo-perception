@@ -119,8 +119,11 @@ impl OcrService {
                     if cropped.width() < 2 || cropped.height() < 2 {
                         continue;
                     }
-                    let rotated = self.detector.classify_and_rotate(&cropped)?;
-                    if let Some(item) = self.recognize_text(&rotated, bbox)? {
+                    let (rotated, was_flipped) = self.detector.classify_and_rotate(&cropped)?;
+                    if let Some(mut item) = self.recognize_text(&rotated, bbox)? {
+                        if was_flipped {
+                            item.angle = 180.0;
+                        }
                         results.push(item);
                     }
                 }
@@ -140,7 +143,7 @@ impl OcrService {
                     if cropped.width() < 2 || cropped.height() < 2 {
                         continue;
                     }
-                    let rotated = self.detector.classify_and_rotate(&cropped)?;
+                    let (rotated, was_flipped) = self.detector.classify_and_rotate(&cropped)?;
 
                     // Use the rotated rect's center/size/angle directly
                     let tbox = TextBox {
@@ -149,7 +152,10 @@ impl OcrService {
                         w: rbox.size.0,
                         h: rbox.size.1,
                     };
-                    let angle_deg = rbox.angle.to_degrees();
+                    let mut angle_deg = rbox.angle.to_degrees();
+                    if was_flipped {
+                        angle_deg += 180.0;
+                    }
 
                     if let Some(mut item) = self.recognize_text(&rotated, &tbox)? {
                         item.angle = angle_deg;

@@ -150,7 +150,9 @@ impl OcrDetector {
     }
 
     /// Classify text orientation (0° or 180°) and rotate if needed.
-    pub fn classify_and_rotate(&self, img: &DynamicImage) -> Result<DynamicImage, String> {
+    /// Returns `(image, was_rotated)` — `was_rotated` is true when the text
+    /// was detected as upside-down and the image was flipped 180°.
+    pub fn classify_and_rotate(&self, img: &DynamicImage) -> Result<(DynamicImage, bool), String> {
         let resized = img.resize_exact(192, 48, image::imageops::FilterType::CatmullRom);
         let rgb = resized.to_rgb8();
 
@@ -178,9 +180,9 @@ impl OcrDetector {
             .map_err(|e| format!("Extract cls output: {e}"))?;
 
         if cls_data.len() >= 2 && cls_data[1] > cls_data[0] && cls_data[1] > 0.9 {
-            Ok(img.rotate180())
+            Ok((img.rotate180(), true))
         } else {
-            Ok(img.clone())
+            Ok((img.clone(), false))
         }
     }
 }

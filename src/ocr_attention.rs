@@ -81,8 +81,11 @@ impl OcrAttentionService {
             if cropped.width() < 2 || cropped.height() < 2 {
                 continue;
             }
-            let rotated = self.detector.classify_and_rotate(&cropped)?;
-            if let Some(item) = self.recognize_text(&rotated, bbox)? {
+            let (rotated, was_flipped) = self.detector.classify_and_rotate(&cropped)?;
+            if let Some(mut item) = self.recognize_text(&rotated, bbox)? {
+                if was_flipped {
+                    item.angle = 180.0;
+                }
                 results.push(item);
             }
         }

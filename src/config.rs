@@ -18,6 +18,11 @@ pub struct AiConfig {
     /// When true, init auto-detects whether the CUDA environment is ready
     /// (provider lib + runtime deps); if not, silently uses CPU.
     pub enable_cuda: bool,
+    /// Enable attention-based recognition for precise character positioning.
+    /// When true and the attention ONNX model is present, RapidOCR uses
+    /// attention decoding instead of CTC — slower but with sub-pixel
+    /// character-level positioning.
+    pub ocr_attention_positioning: bool,
 }
 
 impl Default for AiConfig {
@@ -34,6 +39,7 @@ impl Default for AiConfig {
             enable_cuda: std::env::var("AI_ENABLE_CUDA")
                 .map(|v| !matches!(v.to_lowercase().as_str(), "false" | "0" | "no"))
                 .unwrap_or(true),
+            ocr_attention_positioning: false,
         }
     }
 }

@@ -20,7 +20,6 @@ pub struct AiStatus {
     pub stt_loaded: bool,
 }
 pub mod ocr;
-pub mod ocr_attention;
 pub mod ocr_backend;
 pub mod ocr_detector;
 pub mod ocr_manager;
@@ -361,10 +360,11 @@ impl AiService {
         let manager = self
             .ocr_manager
             .get_or_try_init(|| async {
-                Ok::<_, String>(ocr_manager::OcrManager::with_max_side(
+                Ok::<_, String>(ocr_manager::OcrManager::with_options(
                     self.config.models_dir.clone(),
                     self.config.ocr_sidecar_url.clone(),
                     self.config.ocr_det_max_side,
+                    self.config.ocr_attention_positioning,
                 ))
             })
             .await?;
@@ -387,10 +387,11 @@ impl AiService {
         let manager = self
             .ocr_manager
             .get_or_try_init(|| async {
-                Ok::<_, String>(ocr_manager::OcrManager::with_max_side(
+                Ok::<_, String>(ocr_manager::OcrManager::with_options(
                     self.config.models_dir.clone(),
                     self.config.ocr_sidecar_url.clone(),
                     self.config.ocr_det_max_side,
+                    self.config.ocr_attention_positioning,
                 ))
             })
             .await?;

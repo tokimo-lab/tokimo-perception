@@ -37,17 +37,28 @@ pub struct OcrManager {
     last_use: AtomicU64,
     /// Detection resolution limit (longest side in pixels).
     det_max_side: Option<u32>,
+    /// Whether to enable attention-based recognition for precise positioning.
+    enable_attention: bool,
 }
 
 impl OcrManager {
     pub fn new(models_dir: String, sidecar_url: Option<String>) -> Self {
-        Self::with_max_side(models_dir, sidecar_url, None)
+        Self::with_options(models_dir, sidecar_url, None, false)
     }
 
     pub fn with_max_side(
         models_dir: String,
         sidecar_url: Option<String>,
         det_max_side: Option<u32>,
+    ) -> Self {
+        Self::with_options(models_dir, sidecar_url, det_max_side, false)
+    }
+
+    pub fn with_options(
+        models_dir: String,
+        sidecar_url: Option<String>,
+        det_max_side: Option<u32>,
+        enable_attention: bool,
     ) -> Self {
         let mut backends: HashMap<&'static str, RwLock<Option<Arc<dyn OcrBackend>>>> =
             HashMap::new();
@@ -60,6 +71,7 @@ impl OcrManager {
             sidecar_url,
             last_use: AtomicU64::new(0),
             det_max_side,
+            enable_attention,
         }
     }
 
@@ -205,6 +217,7 @@ impl OcrManager {
 
     fn create_backend(&self, model_name: &str) -> Result<Arc<dyn OcrBackend>, String> {
         let ms = self.det_max_side;
+        let attn = self.enable_attention;
         match model_name {
             MODEL_PP_OCRV5_MOBILE => {
                 let svc = crate::ocr::OcrService::new_with_options(
@@ -212,6 +225,7 @@ impl OcrManager {
                     PaddleOcrVariant::Mobile,
                     crate::ocr::DetectionMode::Components,
                     ms,
+                    false, // attention only for Server variant
                 )?;
                 Ok(Arc::new(svc))
             }
@@ -221,6 +235,7 @@ impl OcrManager {
                     PaddleOcrVariant::Server,
                     crate::ocr::DetectionMode::Contours,
                     ms,
+                    attn,
                 )?;
                 Ok(Arc::new(svc))
             }

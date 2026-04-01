@@ -33,31 +33,31 @@ pub async fn ensure_models_with_progress(
             url: "https://github.com/MT-Photos/mt-photos-ai/releases/download/v1.1.0/vit-b-16.txt.fp32.onnx",
             enabled: config.enable_clip,
         },
-        // OCR models — PP-OCRv5 server (ONNX converted from PaddleOCR)
+        // OCR models — PP-OCRv5 server (ONNX, from HuggingFace bukuroo/PPOCRv5-ONNX)
         ModelFile {
             rel_path: "ocr/PP-OCRv5_server_det.onnx",
-            url: "https://github.com/tokimo-lab/tokimo-ai-models/releases/download/v0.3.0/PP-OCRv5_server_det.onnx",
+            url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-server-det.onnx",
             enabled: config.enable_ocr,
         },
         ModelFile {
             rel_path: "ocr/PP-OCRv5_cls.onnx",
-            url: "https://github.com/tokimo-lab/tokimo-ai-models/releases/download/v0.3.0/PP-OCRv5_cls.onnx",
+            url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-cls.onnx",
             enabled: config.enable_ocr,
         },
         ModelFile {
             rel_path: "ocr/PP-OCRv5_server_rec.onnx",
-            url: "https://github.com/tokimo-lab/tokimo-ai-models/releases/download/v0.3.0/PP-OCRv5_server_rec.onnx",
+            url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-server-rec.onnx",
             enabled: config.enable_ocr,
         },
         // OCR models — PP-OCRv5 mobile (lightweight variant)
         ModelFile {
             rel_path: "ocr/PP-OCRv5_mobile_det.onnx",
-            url: "https://github.com/tokimo-lab/tokimo-ai-models/releases/download/v0.3.0/PP-OCRv5_mobile_det.onnx",
+            url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-mobile-det.onnx",
             enabled: config.enable_ocr,
         },
         ModelFile {
             rel_path: "ocr/PP-OCRv5_mobile_rec.onnx",
-            url: "https://github.com/tokimo-lab/tokimo-ai-models/releases/download/v0.3.0/PP-OCRv5_mobile_rec.onnx",
+            url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-mobile-rec.onnx",
             enabled: config.enable_ocr,
         },
         // OCR models — Attention recognition (generated locally via export script)

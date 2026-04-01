@@ -24,8 +24,6 @@ pub mod ocr_attention;
 pub mod ocr_backend;
 pub mod ocr_detector;
 pub mod ocr_manager;
-pub mod ocr_parseq;
-pub mod ocr_trocr;
 pub mod stt;
 mod tokenizer;
 
@@ -350,7 +348,7 @@ impl AiService {
 
     /// Run OCR on raw image bytes. Returns detected text regions.
     ///
-    /// `model_name` selects the backend (e.g. `"pp-ocrv5-server"`).
+    /// `model_name` selects the backend (e.g. `"rapid-ocr-rust"`).
     /// Pass `None` to use the default server model.
     pub async fn ocr(
         &self,

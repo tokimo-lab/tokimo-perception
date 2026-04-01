@@ -11,13 +11,7 @@ use crate::ocr_backend::{OcrBackend, PaddleOcrVariant};
 
 /// Known model identifiers.
 pub const MODEL_PP_OCRV5_MOBILE: &str = "pp-ocrv5-mobile";
-pub const MODEL_PP_OCRV5_SERVER: &str = "pp-ocrv5-server";
-pub const MODEL_PP_OCRV5_SERVER_ATTN: &str = "pp-ocrv5-server-attn";
-pub const MODEL_PARSEQ_ATTN: &str = "parseq-attn";
-pub const MODEL_TROCR_ZH_ATTN: &str = "trocr-zh-attn";
 pub const MODEL_GOT_OCR_2: &str = "got-ocr-2";
-pub const MODEL_PP_CHATOCR_V3: &str = "pp-chatocr-v3";
-pub const MODEL_RAPID_OCR: &str = "rapid-ocr";
 pub const MODEL_RAPID_OCR_RUST: &str = "rapid-ocr-rust";
 
 /// Default model when none specified.
@@ -58,12 +52,8 @@ impl OcrManager {
         let mut backends: HashMap<&'static str, RwLock<Option<Arc<dyn OcrBackend>>>> =
             HashMap::new();
         backends.insert(MODEL_PP_OCRV5_MOBILE, RwLock::new(None));
-        backends.insert(MODEL_PP_OCRV5_SERVER, RwLock::new(None));
-        backends.insert(MODEL_PP_OCRV5_SERVER_ATTN, RwLock::new(None));
-        backends.insert(MODEL_PARSEQ_ATTN, RwLock::new(None));
-        backends.insert(MODEL_TROCR_ZH_ATTN, RwLock::new(None));
         backends.insert(MODEL_RAPID_OCR_RUST, RwLock::new(None));
-        // VLM models (GOT-OCR-2, PP-ChatOCR-v3) are handled via HTTP sidecar, not backends
+        // VLM models (GOT-OCR-2) are handled via HTTP sidecar, not backends
         Self {
             models_dir,
             backends,
@@ -79,10 +69,7 @@ impl OcrManager {
         self.last_use.store(crate::epoch_secs(), Ordering::Relaxed);
 
         // VLM models: call sidecar HTTP endpoint directly (async)
-        if matches!(
-            model_name,
-            MODEL_GOT_OCR_2 | MODEL_PP_CHATOCR_V3 | MODEL_RAPID_OCR
-        ) {
+        if model_name == MODEL_GOT_OCR_2 {
             let sidecar_url = self.sidecar_url.as_deref().ok_or_else(|| {
                 format!(
                     "VLM OCR backend '{model_name}' requires OCR_SIDECAR_URL to be configured"
@@ -164,44 +151,14 @@ impl OcrManager {
                 loaded: self.is_loaded(MODEL_RAPID_OCR_RUST),
             },
             OcrModelInfo {
-                id: MODEL_PP_OCRV5_SERVER,
-                display_name: "PP-OCRv5 Server",
-                loaded: self.is_loaded(MODEL_PP_OCRV5_SERVER),
-            },
-            OcrModelInfo {
-                id: MODEL_PP_OCRV5_SERVER_ATTN,
-                display_name: "PP-OCRv5 Server Attention",
-                loaded: self.is_loaded(MODEL_PP_OCRV5_SERVER_ATTN),
-            },
-            OcrModelInfo {
-                id: MODEL_PARSEQ_ATTN,
-                display_name: "PARSeq",
-                loaded: self.is_loaded(MODEL_PARSEQ_ATTN),
-            },
-            OcrModelInfo {
-                id: MODEL_TROCR_ZH_ATTN,
-                display_name: "TrOCR 中文",
-                loaded: self.is_loaded(MODEL_TROCR_ZH_ATTN),
-            },
-            OcrModelInfo {
                 id: MODEL_PP_OCRV5_MOBILE,
                 display_name: "PP-OCRv5 Mobile",
                 loaded: self.is_loaded(MODEL_PP_OCRV5_MOBILE),
             },
             OcrModelInfo {
-                id: MODEL_RAPID_OCR,
-                display_name: "RapidOCR",
-                loaded: self.is_loaded(MODEL_RAPID_OCR),
-            },
-            OcrModelInfo {
                 id: MODEL_GOT_OCR_2,
                 display_name: "GOT-OCR 2.0",
-                loaded: self.is_loaded(MODEL_GOT_OCR_2),
-            },
-            OcrModelInfo {
-                id: MODEL_PP_CHATOCR_V3,
-                display_name: "PP-ChatOCRv3",
-                loaded: self.is_loaded(MODEL_PP_CHATOCR_V3),
+                loaded: false, // sidecar model, not tracked locally
             },
         ]
     }
@@ -256,30 +213,6 @@ impl OcrManager {
                     crate::ocr::DetectionMode::Components,
                     ms,
                 )?;
-                Ok(Arc::new(svc))
-            }
-            MODEL_PP_OCRV5_SERVER => {
-                let svc = crate::ocr::OcrService::new_with_options(
-                    &self.models_dir,
-                    PaddleOcrVariant::Server,
-                    crate::ocr::DetectionMode::Components,
-                    ms,
-                )?;
-                Ok(Arc::new(svc))
-            }
-            MODEL_PP_OCRV5_SERVER_ATTN => {
-                let svc =
-                    crate::ocr_attention::OcrAttentionService::with_max_side(&self.models_dir, ms)?;
-                Ok(Arc::new(svc))
-            }
-            MODEL_PARSEQ_ATTN => {
-                let svc =
-                    crate::ocr_parseq::OcrParseqService::with_max_side(&self.models_dir, ms)?;
-                Ok(Arc::new(svc))
-            }
-            MODEL_TROCR_ZH_ATTN => {
-                let svc =
-                    crate::ocr_trocr::OcrTrocrService::with_max_side(&self.models_dir, ms)?;
                 Ok(Arc::new(svc))
             }
             MODEL_RAPID_OCR_RUST => {

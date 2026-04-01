@@ -11,7 +11,8 @@ struct ModelFile {
 /// Which category of models to download.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelCategory {
-    Ocr,
+    OcrServer,
+    OcrMobile,
     Clip,
     Face,
 }
@@ -35,28 +36,34 @@ const MODEL_FILES: &[ModelFile] = &[
     ModelFile {
         rel_path: "ocr/PP-OCRv5_server_det.onnx",
         url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-server-det.onnx",
-        category: ModelCategory::Ocr,
+        category: ModelCategory::OcrServer,
     },
     ModelFile {
         rel_path: "ocr/PP-OCRv5_cls.onnx",
         url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-cls.onnx",
-        category: ModelCategory::Ocr,
+        category: ModelCategory::OcrServer,
     },
     ModelFile {
         rel_path: "ocr/PP-OCRv5_server_rec.onnx",
         url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-server-rec.onnx",
-        category: ModelCategory::Ocr,
+        category: ModelCategory::OcrServer,
     },
     // OCR models — PP-OCRv5 mobile (lightweight variant)
     ModelFile {
         rel_path: "ocr/PP-OCRv5_mobile_det.onnx",
         url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-mobile-det.onnx",
-        category: ModelCategory::Ocr,
+        category: ModelCategory::OcrMobile,
     },
     ModelFile {
         rel_path: "ocr/PP-OCRv5_mobile_rec.onnx",
         url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-mobile-rec.onnx",
-        category: ModelCategory::Ocr,
+        category: ModelCategory::OcrMobile,
+    },
+    // Mobile also needs the shared classifier
+    ModelFile {
+        rel_path: "ocr/PP-OCRv5_cls.onnx",
+        url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-cls.onnx",
+        category: ModelCategory::OcrMobile,
     },
     // Face models (InsightFace buffalo_l pack, publicly accessible)
     ModelFile {
@@ -81,7 +88,8 @@ pub async fn ensure_models_with_progress(
 ) -> Result<(), String> {
     let enabled: Vec<ModelCategory> = [
         (config.enable_clip, ModelCategory::Clip),
-        (config.enable_ocr, ModelCategory::Ocr),
+        (config.enable_ocr, ModelCategory::OcrServer),
+        (config.enable_ocr, ModelCategory::OcrMobile),
         (config.enable_face, ModelCategory::Face),
     ]
     .into_iter()
@@ -203,12 +211,25 @@ pub fn clip_models_present(config: &AiConfig) -> bool {
         && Path::new(&format!("{dir}/clip/vit-b-16.txt.fp32.onnx")).exists()
 }
 
-/// Check whether OCR model files exist on disk (at least server variant).
-pub fn ocr_models_present(config: &AiConfig) -> bool {
+/// Check whether OCR Server model files exist on disk.
+pub fn ocr_server_models_present(config: &AiConfig) -> bool {
     let dir = &config.models_dir;
     Path::new(&format!("{dir}/ocr/PP-OCRv5_server_det.onnx")).exists()
         && Path::new(&format!("{dir}/ocr/PP-OCRv5_cls.onnx")).exists()
         && Path::new(&format!("{dir}/ocr/PP-OCRv5_server_rec.onnx")).exists()
+}
+
+/// Check whether OCR Mobile model files exist on disk.
+pub fn ocr_mobile_models_present(config: &AiConfig) -> bool {
+    let dir = &config.models_dir;
+    Path::new(&format!("{dir}/ocr/PP-OCRv5_mobile_det.onnx")).exists()
+        && Path::new(&format!("{dir}/ocr/PP-OCRv5_cls.onnx")).exists()
+        && Path::new(&format!("{dir}/ocr/PP-OCRv5_mobile_rec.onnx")).exists()
+}
+
+/// Check whether OCR model files exist on disk (at least server variant).
+pub fn ocr_models_present(config: &AiConfig) -> bool {
+    ocr_server_models_present(config)
 }
 
 /// Check whether face detection/recognition model files exist on disk.

@@ -338,6 +338,16 @@ impl AiService {
         models::ocr_models_present(&self.config)
     }
 
+    /// Check whether OCR Server model files exist on disk.
+    pub fn ocr_server_models_ready(&self) -> bool {
+        models::ocr_server_models_present(&self.config)
+    }
+
+    /// Check whether OCR Mobile model files exist on disk.
+    pub fn ocr_mobile_models_ready(&self) -> bool {
+        models::ocr_mobile_models_present(&self.config)
+    }
+
     /// Check whether face model files exist on disk.
     pub fn face_models_ready(&self) -> bool {
         models::face_models_present(&self.config)

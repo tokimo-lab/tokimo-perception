@@ -308,6 +308,15 @@ impl AiService {
         models::ensure_models(&self.config).await
     }
 
+    /// Download any missing models with progress callback.
+    /// Callback: (file_name, status, percent, downloaded_bytes, total_bytes)
+    pub async fn ensure_models_with_progress(
+        &self,
+        on_progress: models::ProgressFn,
+    ) -> Result<(), String> {
+        models::ensure_models_with_progress(&self.config, Some(on_progress)).await
+    }
+
     /// Check whether all enabled model files exist on disk.
     pub fn models_ready(&self) -> bool {
         models::all_models_present(&self.config)

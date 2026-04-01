@@ -374,7 +374,6 @@ impl AiService {
                     self.config.models_dir.clone(),
                     self.config.ocr_sidecar_url.clone(),
                     self.config.ocr_det_max_side,
-                    self.config.ocr_attention_positioning,
                 ))
             })
             .await?;
@@ -401,7 +400,6 @@ impl AiService {
                     self.config.models_dir.clone(),
                     self.config.ocr_sidecar_url.clone(),
                     self.config.ocr_det_max_side,
-                    self.config.ocr_attention_positioning,
                 ))
             })
             .await?;

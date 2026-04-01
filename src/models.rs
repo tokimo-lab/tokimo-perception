@@ -5,11 +5,71 @@ use std::path::Path;
 struct ModelFile {
     rel_path: &'static str,
     url: &'static str,
-    enabled: bool,
+    category: ModelCategory,
+}
+
+/// Which category of models to download.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelCategory {
+    Ocr,
+    Clip,
+    Face,
 }
 
 /// Progress callback: (file_name, status, percent 0-100, downloaded_bytes, total_bytes)
 pub type ProgressFn = Box<dyn Fn(&str, &str, u8, u64, u64) + Send + Sync>;
+
+const MODEL_FILES: &[ModelFile] = &[
+    // CLIP models (from MT-Photos release, publicly accessible)
+    ModelFile {
+        rel_path: "clip/vit-b-16.img.fp32.onnx",
+        url: "https://github.com/MT-Photos/mt-photos-ai/releases/download/v1.1.0/vit-b-16.img.fp32.onnx",
+        category: ModelCategory::Clip,
+    },
+    ModelFile {
+        rel_path: "clip/vit-b-16.txt.fp32.onnx",
+        url: "https://github.com/MT-Photos/mt-photos-ai/releases/download/v1.1.0/vit-b-16.txt.fp32.onnx",
+        category: ModelCategory::Clip,
+    },
+    // OCR models — PP-OCRv5 server (ONNX, from HuggingFace bukuroo/PPOCRv5-ONNX)
+    ModelFile {
+        rel_path: "ocr/PP-OCRv5_server_det.onnx",
+        url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-server-det.onnx",
+        category: ModelCategory::Ocr,
+    },
+    ModelFile {
+        rel_path: "ocr/PP-OCRv5_cls.onnx",
+        url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-cls.onnx",
+        category: ModelCategory::Ocr,
+    },
+    ModelFile {
+        rel_path: "ocr/PP-OCRv5_server_rec.onnx",
+        url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-server-rec.onnx",
+        category: ModelCategory::Ocr,
+    },
+    // OCR models — PP-OCRv5 mobile (lightweight variant)
+    ModelFile {
+        rel_path: "ocr/PP-OCRv5_mobile_det.onnx",
+        url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-mobile-det.onnx",
+        category: ModelCategory::Ocr,
+    },
+    ModelFile {
+        rel_path: "ocr/PP-OCRv5_mobile_rec.onnx",
+        url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-mobile-rec.onnx",
+        category: ModelCategory::Ocr,
+    },
+    // Face models (InsightFace buffalo_l pack, publicly accessible)
+    ModelFile {
+        rel_path: "face/det_10g.onnx",
+        url: "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip#det_10g.onnx",
+        category: ModelCategory::Face,
+    },
+    ModelFile {
+        rel_path: "face/w600k_r50.onnx",
+        url: "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip#w600k_r50.onnx",
+        category: ModelCategory::Face,
+    },
+];
 
 pub async fn ensure_models(config: &AiConfig) -> Result<(), String> {
     ensure_models_with_progress(config, None).await
@@ -19,68 +79,42 @@ pub async fn ensure_models_with_progress(
     config: &AiConfig,
     on_progress: Option<ProgressFn>,
 ) -> Result<(), String> {
+    let enabled: Vec<ModelCategory> = [
+        (config.enable_clip, ModelCategory::Clip),
+        (config.enable_ocr, ModelCategory::Ocr),
+        (config.enable_face, ModelCategory::Face),
+    ]
+    .into_iter()
+    .filter(|(e, _)| *e)
+    .map(|(_, c)| c)
+    .collect();
+
+    for cat in enabled {
+        download_category(config, cat, &on_progress).await?;
+    }
+    Ok(())
+}
+
+/// Download models for a single category.
+pub async fn ensure_category_with_progress(
+    config: &AiConfig,
+    category: ModelCategory,
+    on_progress: Option<ProgressFn>,
+) -> Result<(), String> {
+    download_category(config, category, &on_progress).await
+}
+
+async fn download_category(
+    config: &AiConfig,
+    category: ModelCategory,
+    on_progress: &Option<ProgressFn>,
+) -> Result<(), String> {
     let dir = &config.models_dir;
+    let mut zip_downloaded: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
 
-    let files = [
-        // CLIP models (from MT-Photos release, publicly accessible)
-        ModelFile {
-            rel_path: "clip/vit-b-16.img.fp32.onnx",
-            url: "https://github.com/MT-Photos/mt-photos-ai/releases/download/v1.1.0/vit-b-16.img.fp32.onnx",
-            enabled: config.enable_clip,
-        },
-        ModelFile {
-            rel_path: "clip/vit-b-16.txt.fp32.onnx",
-            url: "https://github.com/MT-Photos/mt-photos-ai/releases/download/v1.1.0/vit-b-16.txt.fp32.onnx",
-            enabled: config.enable_clip,
-        },
-        // OCR models — PP-OCRv5 server (ONNX, from HuggingFace bukuroo/PPOCRv5-ONNX)
-        ModelFile {
-            rel_path: "ocr/PP-OCRv5_server_det.onnx",
-            url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-server-det.onnx",
-            enabled: config.enable_ocr,
-        },
-        ModelFile {
-            rel_path: "ocr/PP-OCRv5_cls.onnx",
-            url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-cls.onnx",
-            enabled: config.enable_ocr,
-        },
-        ModelFile {
-            rel_path: "ocr/PP-OCRv5_server_rec.onnx",
-            url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-server-rec.onnx",
-            enabled: config.enable_ocr,
-        },
-        // OCR models — PP-OCRv5 mobile (lightweight variant)
-        ModelFile {
-            rel_path: "ocr/PP-OCRv5_mobile_det.onnx",
-            url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-mobile-det.onnx",
-            enabled: config.enable_ocr,
-        },
-        ModelFile {
-            rel_path: "ocr/PP-OCRv5_mobile_rec.onnx",
-            url: "https://huggingface.co/bukuroo/PPOCRv5-ONNX/resolve/main/ppocrv5-mobile-rec.onnx",
-            enabled: config.enable_ocr,
-        },
-        // OCR models — Attention recognition (generated locally via export script)
-        // This model is NOT auto-downloaded — run scripts/export-attention-models.py
-        // to generate it from PaddleOCR SARNet weights.
-        // Face models (InsightFace buffalo_l pack, publicly accessible)
-        ModelFile {
-            rel_path: "face/det_10g.onnx",
-            url: "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip#det_10g.onnx",
-            enabled: config.enable_face,
-        },
-        ModelFile {
-            rel_path: "face/w600k_r50.onnx",
-            url: "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip#w600k_r50.onnx",
-            enabled: config.enable_face,
-        },
-    ];
-
-    // Deduplicate zip downloads: face models come from a single buffalo_l.zip
-    let mut zip_downloaded: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    for f in &files {
-        if !f.enabled {
+    for f in MODEL_FILES {
+        if f.category != category {
             continue;
         }
         let full_path = format!("{}/{}", dir, f.rel_path);

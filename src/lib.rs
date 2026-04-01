@@ -317,6 +317,15 @@ impl AiService {
         models::ensure_models_with_progress(&self.config, Some(on_progress)).await
     }
 
+    /// Download models for a single category with progress callback.
+    pub async fn ensure_category_with_progress(
+        &self,
+        category: models::ModelCategory,
+        on_progress: models::ProgressFn,
+    ) -> Result<(), String> {
+        models::ensure_category_with_progress(&self.config, category, Some(on_progress)).await
+    }
+
     /// Check whether all enabled model files exist on disk.
     pub fn models_ready(&self) -> bool {
         models::all_models_present(&self.config)

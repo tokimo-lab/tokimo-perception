@@ -21,7 +21,7 @@ pub struct TagResult {
 }
 
 // Minimum similarity threshold to consider a tag relevant
-const MIN_SCORE: f32 = 0.20;
+const MIN_SCORE: f32 = 0.26;
 const MAX_TAGS: usize = 5;
 
 pub static CATEGORIES: &[TagCategory] = &[
@@ -217,7 +217,7 @@ pub static CATEGORIES: &[TagCategory] = &[
             "办公室", "工作台", "书桌",
             "会议室", "教室", "图书馆", "书房",
             "走廊", "楼梯", "阳台", "露台",
-            "商场", "超市", "便利店", "市场",
+            "商场", "超市", "市场",
             "酒店大堂", "酒店房间",
             "健身房", "游泳池",
         ],
@@ -343,7 +343,6 @@ pub static CATEGORIES: &[TagCategory] = &[
         name: "文档",
         icon: "📄",
         subs: &[
-            "截图", "屏幕截图", "手机截图",
             "名片", "证件", "身份证", "驾照",
             "收据", "发票", "账单",
             "菜单", "价目表",

@@ -2,6 +2,11 @@
 ///
 /// Two-level taxonomy: categories (user-facing labels) → subcategories (CLIP prompts).
 /// Classification matches against subcategories for precision, then rolls up to category for display.
+///
+/// Embedding cache is persisted to disk so that dev-server restarts don't require
+/// re-computing ~1000 text embeddings (~7 s on CPU). The cache file includes a
+/// taxonomy hash — any change to CATEGORIES auto-invalidates the cache.
+use std::io::{Read, Write};
 use std::sync::Mutex;
 
 /// A category with its display name and subcategory prompts.
@@ -544,15 +549,156 @@ fn cosine_sim(a: &[f32], b: &[f32]) -> f32 {
     dot / (norm_a * norm_b)
 }
 
-/// Initialize the embedding cache by encoding all subcategory prompts.
-/// Called once on first classification request.
+/// Deterministic hash of the full taxonomy (category names + subcategory prompts).
+/// Any edit to CATEGORIES changes this value, which invalidates the disk cache.
+fn taxonomy_hash() -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for cat in CATEGORIES {
+        cat.name.hash(&mut hasher);
+        cat.icon.hash(&mut hasher);
+        for sub in cat.subs {
+            sub.hash(&mut hasher);
+        }
+    }
+    hasher.finish()
+}
+
+const CACHE_MAGIC: &[u8; 8] = b"CLIPTAG\0";
+const CACHE_VERSION: u32 = 1;
+
+/// Try to load embeddings from a disk cache file.
+/// Returns `None` if the file doesn't exist, is corrupt, or has a stale taxonomy hash.
+fn try_load_disk_cache(path: &std::path::Path, expected_hash: u64) -> Option<Vec<EmbeddingEntry>> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).ok()?;
+
+    let mut cursor = 0usize;
+
+    // magic (8) + version (4) + hash (8) + vec_dim (4) + num_entries (4) = 28 bytes header
+    if buf.len() < 28 {
+        return None;
+    }
+    if &buf[cursor..cursor + 8] != CACHE_MAGIC {
+        return None;
+    }
+    cursor += 8;
+
+    let version = u32::from_le_bytes(buf[cursor..cursor + 4].try_into().ok()?);
+    if version != CACHE_VERSION {
+        return None;
+    }
+    cursor += 4;
+
+    let stored_hash = u64::from_le_bytes(buf[cursor..cursor + 8].try_into().ok()?);
+    if stored_hash != expected_hash {
+        tracing::info!("CLIP cache taxonomy hash mismatch — rebuilding");
+        return None;
+    }
+    cursor += 8;
+
+    let vec_dim = u32::from_le_bytes(buf[cursor..cursor + 4].try_into().ok()?) as usize;
+    cursor += 4;
+
+    let num_entries = u32::from_le_bytes(buf[cursor..cursor + 4].try_into().ok()?) as usize;
+    cursor += 4;
+
+    // Validate total size: header + entries * (cat_idx(4) + sub_idx(4) + vec_dim*4)
+    let entry_size = 4 + 4 + vec_dim * 4;
+    if buf.len() < 28 + num_entries * entry_size {
+        return None;
+    }
+
+    let mut entries = Vec::with_capacity(num_entries);
+    for _ in 0..num_entries {
+        let cat_idx = u32::from_le_bytes(buf[cursor..cursor + 4].try_into().ok()?) as usize;
+        cursor += 4;
+        let sub_idx = u32::from_le_bytes(buf[cursor..cursor + 4].try_into().ok()?) as usize;
+        cursor += 4;
+
+        let floats: Vec<f32> = buf[cursor..cursor + vec_dim * 4]
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+            .collect();
+        cursor += vec_dim * 4;
+
+        entries.push(EmbeddingEntry {
+            category_idx: cat_idx,
+            sub_idx,
+            vec: floats,
+        });
+    }
+
+    Some(entries)
+}
+
+/// Persist embeddings to disk so the next process start skips inference.
+fn save_disk_cache(
+    path: &std::path::Path,
+    hash: u64,
+    entries: &[EmbeddingEntry],
+    vec_dim: usize,
+) {
+    let write = || -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut file = std::fs::File::create(path)?;
+        file.write_all(CACHE_MAGIC)?;
+        file.write_all(&CACHE_VERSION.to_le_bytes())?;
+        file.write_all(&hash.to_le_bytes())?;
+        file.write_all(&(vec_dim as u32).to_le_bytes())?;
+        file.write_all(&(entries.len() as u32).to_le_bytes())?;
+        for entry in entries {
+            file.write_all(&(entry.category_idx as u32).to_le_bytes())?;
+            file.write_all(&(entry.sub_idx as u32).to_le_bytes())?;
+            for &f in &entry.vec {
+                file.write_all(&f.to_le_bytes())?;
+            }
+        }
+        Ok(())
+    };
+    if let Err(e) = write() {
+        tracing::warn!("Failed to save CLIP embedding cache: {e}");
+    }
+}
+
+/// Initialize the embedding cache.
+///
+/// 1. Try loading from disk (`{cache_dir}/clip/category-embeddings.bin`)
+/// 2. If missing/stale, compute all embeddings via `embed_fn` and persist to disk
 fn ensure_cache(
     embed_fn: &dyn Fn(&str) -> Result<Vec<f32>, String>,
+    cache_dir: Option<&str>,
 ) -> Result<(), String> {
     let mut guard = CACHE.lock().map_err(|e| format!("Cache lock: {e}"))?;
     if guard.is_some() {
         return Ok(());
     }
+
+    let hash = taxonomy_hash();
+    let cache_path = cache_dir.map(|dir| {
+        std::path::PathBuf::from(dir)
+            .join("clip")
+            .join("category-embeddings.bin")
+    });
+
+    // Try disk cache first
+    if let Some(ref path) = cache_path {
+        if let Some(entries) = try_load_disk_cache(path, hash) {
+            tracing::info!(
+                "CLIP category embeddings loaded from disk cache: {} entries ({} categories)",
+                entries.len(),
+                CATEGORIES.len()
+            );
+            *guard = Some(EmbeddingCache { entries });
+            return Ok(());
+        }
+    }
+
+    // Compute from scratch
+    let start = std::time::Instant::now();
     let mut entries = Vec::new();
     for (cat_idx, cat) in CATEGORIES.iter().enumerate() {
         for (sub_idx, sub) in cat.subs.iter().enumerate() {
@@ -565,11 +711,21 @@ fn ensure_cache(
             });
         }
     }
+    let elapsed = start.elapsed();
     tracing::info!(
-        "CLIP category embeddings initialized: {} entries across {} categories",
+        "CLIP category embeddings computed: {} entries across {} categories in {:.1}s",
         entries.len(),
-        CATEGORIES.len()
+        CATEGORIES.len(),
+        elapsed.as_secs_f32()
     );
+
+    // Persist to disk for next startup
+    if let Some(ref path) = cache_path {
+        let vec_dim = entries.first().map(|e| e.vec.len()).unwrap_or(512);
+        save_disk_cache(path, hash, &entries, vec_dim);
+        tracing::info!("CLIP embedding cache saved to {}", path.display());
+    }
+
     *guard = Some(EmbeddingCache { entries });
     Ok(())
 }
@@ -582,8 +738,9 @@ fn ensure_cache(
 pub fn classify(
     image_vec: &[f32],
     embed_fn: &dyn Fn(&str) -> Result<Vec<f32>, String>,
+    cache_dir: Option<&str>,
 ) -> Result<Vec<TagResult>, String> {
-    ensure_cache(embed_fn)?;
+    ensure_cache(embed_fn, cache_dir)?;
     let guard = CACHE.lock().map_err(|e| format!("Cache lock: {e}"))?;
     let cache = guard.as_ref().expect("cache initialized above");
 

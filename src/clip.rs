@@ -23,6 +23,7 @@ pub struct ClipService {
     img_session: Mutex<Session>,
     txt_session: Mutex<Session>,
     tokenizer: BertTokenizer,
+    cache_dir: String,
 }
 
 impl ClipService {
@@ -52,6 +53,7 @@ impl ClipService {
             img_session: Mutex::new(img_session),
             txt_session: Mutex::new(txt_session),
             tokenizer,
+            cache_dir: models_dir.to_string(),
         })
     }
 
@@ -93,7 +95,7 @@ impl ClipService {
 
     /// Classify image vector against the taxonomy using zero-shot CLIP.
     pub fn classify(&self, image_vec: &[f32]) -> Result<Vec<TagResult>, String> {
-        clip_categories::classify(image_vec, &|text| self.embed_text(text))
+        clip_categories::classify(image_vec, &|text| self.embed_text(text), Some(&self.cache_dir))
     }
 }
 

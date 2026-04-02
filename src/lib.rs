@@ -5,6 +5,7 @@
 //! of inactivity to free memory.
 
 pub mod clip;
+pub mod clip_categories;
 pub mod config;
 pub mod face;
 pub mod models;
@@ -434,6 +435,18 @@ impl AiService {
         }
         let svc = self.get_or_init_clip().await?;
         svc.embed_text(text)
+    }
+
+    /// Classify an image vector against the built-in taxonomy using CLIP zero-shot.
+    pub async fn clip_classify(
+        &self,
+        image_vec: &[f32],
+    ) -> Result<Vec<clip_categories::TagResult>, String> {
+        if !self.config.enable_clip {
+            return Err("CLIP is disabled".into());
+        }
+        let svc = self.get_or_init_clip().await?;
+        svc.classify(image_vec)
     }
 
     async fn get_or_init_clip(&self) -> Result<Arc<clip::ClipService>, String> {

@@ -1,7 +1,10 @@
 /// Chinese-CLIP ViT-B-16 service via ONNX Runtime.
 /// Image → 512-dim vector, Text → 512-dim vector.
+/// Also provides zero-shot classification via clip_categories taxonomy.
 use std::path::Path;
 use std::sync::Mutex;
+
+use crate::clip_categories::{self, TagResult};
 
 use image::DynamicImage;
 use ndarray::Array4;
@@ -86,6 +89,11 @@ impl ClipService {
             .map_err(|e| format!("Extract tensor: {e}"))?;
 
         Ok(data.to_vec())
+    }
+
+    /// Classify image vector against the taxonomy using zero-shot CLIP.
+    pub fn classify(&self, image_vec: &[f32]) -> Result<Vec<TagResult>, String> {
+        clip_categories::classify(image_vec, &|text| self.embed_text(text))
     }
 }
 

@@ -38,18 +38,36 @@ use tokio::sync::{OnceCell, RwLock};
 const MODEL_IDLE_TIMEOUT: Duration = Duration::from_secs(180); // 3 minutes
 
 /// Build an ONNX Runtime session from a model file.
-/// When CUDA is enabled (via `AI_ENABLE_CUDA`), registers the CUDA execution provider;
-/// if the GPU is inaccessible or drivers are misconfigured the session creation will fail
-/// with a clear error — there is no silent CPU fallback.
+/// When CUDA is enabled, attempts to register the CUDA execution provider.
+/// If CUDA EP registration fails (e.g. driver mismatch), falls back to CPU
+/// with a warning log.
 pub fn build_session(path: impl AsRef<std::path::Path>) -> ort::Result<ort::session::Session> {
     use ort::session::Session;
 
     let path = path.as_ref();
+    let filename = path.file_name().unwrap_or_default().to_string_lossy();
+
     if ENABLE_CUDA.load(Ordering::Relaxed) {
-        Session::builder()?
-            .with_execution_providers([ort::ep::CUDA::default().build()])?
-            .commit_from_file(path)
+        tracing::info!("[ort] Building session for {filename} with CUDA EP");
+        // Use error_on_failure so we know if CUDA EP actually worked.
+        // If it fails, log the error and fall back to CPU explicitly.
+        match Session::builder()?
+            .with_execution_providers([ort::ep::CUDA::default().build().error_on_failure()])
+        {
+            Ok(mut builder) => {
+                let session = builder.commit_from_file(path)?;
+                tracing::info!("[ort] ✓ Session {filename} loaded with CUDA EP");
+                Ok(session)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[ort] CUDA EP registration failed for {filename}: {e} — falling back to CPU"
+                );
+                Session::builder()?.commit_from_file(path)
+            }
+        }
     } else {
+        tracing::info!("[ort] Building session for {filename} (CPU only)");
         Session::builder()?.commit_from_file(path)
     }
 }

@@ -20,8 +20,11 @@ pub struct TagResult {
     pub score: f32,
 }
 
-// Minimum similarity threshold to consider a tag relevant
-const MIN_SCORE: f32 = 0.26;
+// Chinese-CLIP logit_scale ≈ 4.6, so exp(4.6) ≈ 100.
+// This temperature makes softmax sharply peaked on the best match.
+const LOGIT_SCALE: f32 = 100.0;
+// Minimum softmax probability to include a tag
+const MIN_PROB: f32 = 0.02;
 const MAX_TAGS: usize = 5;
 
 pub static CATEGORIES: &[TagCategory] = &[
@@ -506,7 +509,10 @@ fn ensure_cache(
 }
 
 /// Classify an image vector against the taxonomy.
-/// Returns top matching tags (one per category, sorted by score).
+///
+/// Uses softmax normalization over per-category max similarities.
+/// This makes scoring relative: only categories significantly more similar
+/// than others get high probability, regardless of absolute cosine values.
 pub fn classify(
     image_vec: &[f32],
     embed_fn: &dyn Fn(&str) -> Result<Vec<f32>, String>,
@@ -515,39 +521,56 @@ pub fn classify(
     let guard = CACHE.lock().map_err(|e| format!("Cache lock: {e}"))?;
     let cache = guard.as_ref().expect("cache initialized above");
 
-    // Score each subcategory
+    // Step 1: For each category, find the best-matching subcategory (max cosine sim)
     let mut best_per_cat: Vec<Option<(usize, f32)>> = vec![None; CATEGORIES.len()];
 
     for entry in &cache.entries {
-        let score = cosine_sim(image_vec, &entry.vec);
+        let sim = cosine_sim(image_vec, &entry.vec);
         let slot = &mut best_per_cat[entry.category_idx];
-        if score >= MIN_SCORE {
-            match slot {
-                Some((_, prev)) if score > *prev => {
-                    *slot = Some((entry.sub_idx, score));
-                }
-                None => {
-                    *slot = Some((entry.sub_idx, score));
-                }
-                _ => {}
+        match slot {
+            Some((_, prev)) if sim > *prev => {
+                *slot = Some((entry.sub_idx, sim));
             }
+            None => {
+                *slot = Some((entry.sub_idx, sim));
+            }
+            _ => {}
         }
     }
 
-    // Collect results and sort by score
-    let mut results: Vec<TagResult> = best_per_cat
+    // Step 2: Softmax over per-category max similarities
+    // logits = cosine_sim * LOGIT_SCALE
+    let cat_scores: Vec<(usize, usize, f32)> = best_per_cat
         .iter()
         .enumerate()
-        .filter_map(|(cat_idx, best)| {
-            best.map(|(sub_idx, score)| {
-                let cat = &CATEGORIES[cat_idx];
-                TagResult {
+        .filter_map(|(cat_idx, best)| best.map(|(sub_idx, sim)| (cat_idx, sub_idx, sim)))
+        .collect();
+
+    if cat_scores.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let logits: Vec<f32> = cat_scores.iter().map(|(_, _, sim)| sim * LOGIT_SCALE).collect();
+    let max_logit = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let exp_sum: f32 = logits.iter().map(|l| (l - max_logit).exp()).sum();
+
+    // Step 3: Filter by probability threshold and collect results
+    let mut results: Vec<TagResult> = cat_scores
+        .iter()
+        .zip(logits.iter())
+        .filter_map(|((cat_idx, sub_idx, _sim), logit)| {
+            let prob = (logit - max_logit).exp() / exp_sum;
+            if prob >= MIN_PROB {
+                let cat = &CATEGORIES[*cat_idx];
+                Some(TagResult {
                     category: cat.name,
                     icon: cat.icon,
-                    subcategory: cat.subs[sub_idx],
-                    score,
-                }
-            })
+                    subcategory: cat.subs[*sub_idx],
+                    score: prob,
+                })
+            } else {
+                None
+            }
         })
         .collect();
 

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{OnceCell, RwLock};
 
 use crate::ocr::OcrItem;
 use crate::ocr_backend::{OcrBackend, PaddleOcrVariant};
@@ -30,22 +30,52 @@ pub struct OcrModelInfo {
 
 /// Per-backend lazy-init slot.
 ///
-/// `init_lock` serializes initialization — at most one caller runs the
-/// (expensive) ONNX model load at a time. All other concurrent callers wait
-/// on the lock and get the already-loaded backend via the double-check inside
-/// `get_or_init_backend`. This prevents the race where two concurrent
-/// requests both see `None` in the fast-path and both kick off a load.
+/// `OnceCell::get_or_try_init` is the standard Tokio "init once" primitive:
+/// the first caller runs the init future, all concurrent callers wait for it,
+/// no double-initialization possible. The outer `RwLock` is only needed for
+/// eviction — a write lock replaces the cell with a fresh one to free memory.
 struct BackendSlot {
-    backend: RwLock<Option<Arc<dyn OcrBackend>>>,
-    init_lock: Mutex<()>,
+    cell: RwLock<OnceCell<Arc<dyn OcrBackend>>>,
 }
 
 impl BackendSlot {
     fn new() -> Self {
         Self {
-            backend: RwLock::new(None),
-            init_lock: Mutex::new(()),
+            cell: RwLock::new(OnceCell::new()),
         }
+    }
+
+    async fn get_or_init(
+        &self,
+        model_name: &str,
+        models_dir: &str,
+        det_max_side: Option<u32>,
+    ) -> Result<Arc<dyn OcrBackend>, String> {
+        let guard = self.cell.read().await;
+        let name = model_name.to_string();
+        let dir = models_dir.to_string();
+        let backend = guard
+            .get_or_try_init(|| async move {
+                tokio::task::spawn_blocking(move || create_backend_sync(&name, &dir, det_max_side))
+                    .await
+                    .map_err(|e| format!("Backend init task panicked: {e}"))?
+            })
+            .await?;
+        Ok(Arc::clone(backend))
+    }
+
+    async fn evict(&self, name: &str) -> bool {
+        let mut guard = self.cell.write().await;
+        let was_loaded = guard.get().is_some();
+        if was_loaded {
+            *guard = OnceCell::new();
+            tracing::info!("Evicted OCR backend: {name}");
+        }
+        was_loaded
+    }
+
+    fn is_loaded(&self) -> bool {
+        self.cell.try_read().is_ok_and(|g| g.get().is_some())
     }
 }
 
@@ -149,10 +179,7 @@ impl OcrManager {
     pub async fn evict_all(&self) {
         let mut evicted = 0usize;
         for (name, slot) in &self.backends {
-            let mut guard = slot.backend.write().await;
-            if guard.is_some() {
-                *guard = None;
-                tracing::info!("Evicted OCR backend: {name}");
+            if slot.evict(name).await {
                 evicted += 1;
             }
         }
@@ -194,14 +221,12 @@ impl OcrManager {
     fn is_loaded(&self, model: &str) -> bool {
         self.backends
             .get(model)
-            .is_some_and(|slot| slot.backend.try_read().is_ok_and(|g| g.is_some()))
+            .is_some_and(|slot| slot.is_loaded())
     }
 
     /// Whether any OCR backend is currently loaded in memory.
     pub fn has_loaded_backends(&self) -> bool {
-        self.backends
-            .values()
-            .any(|slot| slot.backend.try_read().is_ok_and(|g| g.is_some()))
+        self.backends.values().any(|slot| slot.is_loaded())
     }
 
     async fn get_or_init_backend(
@@ -212,40 +237,8 @@ impl OcrManager {
             .backends
             .get(model_name)
             .ok_or_else(|| format!("Unknown OCR model: {model_name}"))?;
-
-        // Fast path: read lock, backend already loaded
-        {
-            let guard = slot.backend.read().await;
-            if let Some(backend) = guard.as_ref() {
-                return Ok(Arc::clone(backend));
-            }
-        }
-
-        // Slow path: acquire init_lock so only one caller runs the load.
-        // All other concurrent callers block here and will hit the
-        // double-check below once the first caller is done.
-        let _init = slot.init_lock.lock().await;
-
-        // Double-check: another caller may have loaded while we waited.
-        {
-            let guard = slot.backend.read().await;
-            if let Some(backend) = guard.as_ref() {
-                return Ok(Arc::clone(backend));
-            }
-        }
-
-        let models_dir = self.models_dir.clone();
-        let det_max_side = self.det_max_side;
-        let name = model_name.to_string();
-
-        let backend = tokio::task::spawn_blocking(move || {
-            create_backend_sync(&name, &models_dir, det_max_side)
-        })
-        .await
-        .map_err(|e| format!("Backend init task panicked: {e}"))??;
-
-        *slot.backend.write().await = Some(Arc::clone(&backend));
-        Ok(backend)
+        slot.get_or_init(model_name, &self.models_dir, self.det_max_side)
+            .await
     }
 }
 

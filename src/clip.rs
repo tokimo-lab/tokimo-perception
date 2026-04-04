@@ -2,7 +2,8 @@
 /// Image → 512-dim vector, Text → 512-dim vector.
 /// Also provides zero-shot classification via clip_categories taxonomy.
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::Mutex as StdMutex;
+use tokio::sync::Mutex;
 
 use crate::clip_categories::{self, TagResult};
 
@@ -47,6 +48,32 @@ impl ClipService {
             .map_err(|e| format!("Load CLIP txt model: {e}"))?;
 
         let tokenizer = BertTokenizer::new();
+
+        // Pre-warm the category embedding cache while still in a sync context
+        // (new() is called inside spawn_blocking from AiService).
+        // We use a std Mutex temporarily for the sync callback.
+        let txt_session_std = StdMutex::new(txt_session);
+        let cache_dir_clone = models_dir.to_string();
+        let _ = clip_categories::ensure_cache(
+            &|text| {
+                let token_ids = tokenizer.encode(text, CONTEXT_LENGTH);
+                let input_tensor =
+                    Tensor::from_array(([1i64, CONTEXT_LENGTH as i64], token_ids))
+                        .map_err(|e| format!("Create tensor: {e}"))?;
+                let mut session =
+                    txt_session_std.lock().map_err(|e| format!("Lock: {e}"))?;
+                let outputs = session
+                    .run(ort::inputs![input_tensor])
+                    .map_err(|e| format!("CLIP txt inference: {e}"))?;
+                let (_shape, data) = outputs[0]
+                    .try_extract_tensor::<f32>()
+                    .map_err(|e| format!("Extract tensor: {e}"))?;
+                Ok(data.to_vec())
+            },
+            Some(&cache_dir_clone),
+        );
+        let txt_session = txt_session_std.into_inner().map_err(|e| format!("Unwrap: {e}"))?;
+
         tracing::info!("CLIP service ready.");
 
         Ok(Self {
@@ -58,44 +85,57 @@ impl ClipService {
     }
 
     /// Image → 512-dim CLIP embedding.
-    pub fn embed_image(&self, img: &DynamicImage) -> Result<Vec<f32>, String> {
+    pub async fn embed_image(&self, img: &DynamicImage) -> Result<Vec<f32>, String> {
         let input = preprocess_image(img);
         let input_tensor =
             Tensor::from_array(input).map_err(|e| format!("Create tensor: {e}"))?;
+        let options =
+            ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
 
-        let mut session = self.img_session.lock().map_err(|e| format!("Lock: {e}"))?;
-        let outputs = session
-            .run(ort::inputs![input_tensor])
-            .map_err(|e| format!("CLIP img inference: {e}"))?;
+        let data: Vec<f32> = {
+            let mut session = self.img_session.lock().await;
+            let outputs = session
+                .run_async(ort::inputs![input_tensor], &options)
+                .map_err(|e| format!("CLIP img run_async: {e}"))?
+                .await
+                .map_err(|e| format!("CLIP img inference: {e}"))?;
+            let (_shape, d) = outputs[0]
+                .try_extract_tensor::<f32>()
+                .map_err(|e| format!("Extract tensor: {e}"))?;
+            d.to_vec()
+        };
 
-        let (_shape, data) = outputs[0]
-            .try_extract_tensor::<f32>()
-            .map_err(|e| format!("Extract tensor: {e}"))?;
-
-        Ok(data.to_vec())
+        Ok(data)
     }
 
     /// Text → 512-dim CLIP embedding.
-    pub fn embed_text(&self, text: &str) -> Result<Vec<f32>, String> {
+    pub async fn embed_text(&self, text: &str) -> Result<Vec<f32>, String> {
         let token_ids = self.tokenizer.encode(text, CONTEXT_LENGTH);
         let input_tensor = Tensor::from_array(([1i64, CONTEXT_LENGTH as i64], token_ids))
             .map_err(|e| format!("Create tensor: {e}"))?;
+        let options =
+            ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
 
-        let mut session = self.txt_session.lock().map_err(|e| format!("Lock: {e}"))?;
-        let outputs = session
-            .run(ort::inputs![input_tensor])
-            .map_err(|e| format!("CLIP txt inference: {e}"))?;
+        let data: Vec<f32> = {
+            let mut session = self.txt_session.lock().await;
+            let outputs = session
+                .run_async(ort::inputs![input_tensor], &options)
+                .map_err(|e| format!("CLIP txt run_async: {e}"))?
+                .await
+                .map_err(|e| format!("CLIP txt inference: {e}"))?;
+            let (_shape, d) = outputs[0]
+                .try_extract_tensor::<f32>()
+                .map_err(|e| format!("Extract tensor: {e}"))?;
+            d.to_vec()
+        };
 
-        let (_shape, data) = outputs[0]
-            .try_extract_tensor::<f32>()
-            .map_err(|e| format!("Extract tensor: {e}"))?;
-
-        Ok(data.to_vec())
+        Ok(data)
     }
 
     /// Classify image vector against the taxonomy using zero-shot CLIP.
+    /// Cache is already warm from `new()`, so this is sync and fast.
     pub fn classify(&self, image_vec: &[f32]) -> Result<Vec<TagResult>, String> {
-        clip_categories::classify(image_vec, &|text| self.embed_text(text), Some(&self.cache_dir))
+        clip_categories::classify(image_vec, &|_| Err("cache miss".into()), Some(&self.cache_dir))
     }
 }
 

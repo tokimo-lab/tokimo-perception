@@ -136,18 +136,12 @@ impl OcrManager {
             return vlm_ocr_via_sidecar(sidecar_url, model_name, image_bytes).await;
         }
 
-        // Local Paddle models: decode image + run ONNX inference in a blocking
-        // thread to avoid starving the tokio async runtime.
+        // Local Paddle models: decode image (fast CPU op) then run async ONNX inference.
+        // No spawn_blocking needed — sessions use tokio::sync::Mutex + run_async.
         let bytes = image_bytes.to_vec();
         let backend = self.get_or_init_backend(model_name).await?;
-
-        tokio::task::spawn_blocking(move || {
-            let img =
-                image::load_from_memory(&bytes).map_err(|e| format!("Invalid image: {e}"))?;
-            backend.recognize(&img)
-        })
-        .await
-        .map_err(|e| format!("OCR task panicked: {e}"))?
+        let img = image::load_from_memory(&bytes).map_err(|e| format!("Invalid image: {e}"))?;
+        backend.recognize(&img).await
     }
 
     /// Hybrid OCR: use `det_model` for bounding-box detection, `vlm_model` for

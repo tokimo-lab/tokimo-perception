@@ -13,6 +13,7 @@ path = "src/lib.rs"
 [dependencies]
 # Async
 tokio = { version = "1", features = ["fs", "sync"] }
+async-trait = "0.1"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

@@ -754,7 +754,7 @@ fn save_disk_cache(
 ///
 /// 1. Try loading from disk (`{cache_dir}/clip/category-embeddings.bin`)
 /// 2. If missing/stale, compute all embeddings via `embed_fn` and persist to disk
-fn ensure_cache(
+pub fn ensure_cache(
     embed_fn: &dyn Fn(&str) -> Result<Vec<f32>, String>,
     cache_dir: Option<&str>,
 ) -> Result<(), String> {

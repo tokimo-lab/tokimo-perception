@@ -3,7 +3,7 @@
 /// Extracted from `OcrService` so that both CTC-based (`OcrService`) and
 /// Attention-based (`OcrAttentionService`) recognisers can share the same
 /// expensive detection + classification ONNX sessions.
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 
 use image::{DynamicImage, GrayImage, Luma};
 use ndarray::Array4;
@@ -87,7 +87,7 @@ impl OcrDetector {
     }
 
     /// Common DBNet inference — shared by both detection modes.
-    fn run_dbnet(&self, img: &DynamicImage) -> Result<DetectionOutput, String> {
+    async fn run_dbnet(&self, img: &DynamicImage) -> Result<DetectionOutput, String> {
         let (orig_w, orig_h) = (img.width() as f32, img.height() as f32);
 
         let max_side = self.det_max_side;
@@ -115,17 +115,23 @@ impl OcrDetector {
 
         let input_tensor =
             Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
-        let mut session = self.det_session.lock().map_err(|e| format!("Lock: {e}"))?;
-        let outputs = session
-            .run(ort::inputs![input_tensor])
-            .map_err(|e| format!("Detection inference: {e}"))?;
-
-        let (_shape, prob_data) = outputs[0]
-            .try_extract_tensor::<f32>()
-            .map_err(|e| format!("Extract det output: {e}"))?;
+        let options =
+            ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let prob_data: Vec<f32> = {
+            let mut session = self.det_session.lock().await;
+            let outputs = session
+                .run_async(ort::inputs![input_tensor], &options)
+                .map_err(|e| format!("Detection run_async: {e}"))?
+                .await
+                .map_err(|e| format!("Detection inference: {e}"))?;
+            let (_shape, prob) = outputs[0]
+                .try_extract_tensor::<f32>()
+                .map_err(|e| format!("Extract det output: {e}"))?;
+            prob.to_vec()
+        };
 
         Ok(DetectionOutput {
-            prob_data: prob_data.to_vec(),
+            prob_data,
             pad_w: pad_w as usize,
             pad_h: pad_h as usize,
             img_w: new_w as usize,
@@ -136,8 +142,8 @@ impl OcrDetector {
     }
 
     /// Run DBNet text detection, return bounding boxes in original image coords.
-    pub fn detect(&self, img: &DynamicImage) -> Result<Vec<TextBox>, String> {
-        let out = self.run_dbnet(img)?;
+    pub async fn detect(&self, img: &DynamicImage) -> Result<Vec<TextBox>, String> {
+        let out = self.run_dbnet(img).await?;
         Ok(extract_boxes_from_prob_map(
             &out.prob_data,
             out.pad_w,
@@ -151,8 +157,8 @@ impl OcrDetector {
 
     /// Run DBNet text detection with contour-based post-processing (RapidOCR-style).
     /// Returns rotated bounding boxes for better results on angled text.
-    pub fn detect_with_contours(&self, img: &DynamicImage) -> Result<Vec<RotatedBox>, String> {
-        let out = self.run_dbnet(img)?;
+    pub async fn detect_with_contours(&self, img: &DynamicImage) -> Result<Vec<RotatedBox>, String> {
+        let out = self.run_dbnet(img).await?;
         Ok(extract_rotated_boxes(
             &out.prob_data,
             out.pad_w,
@@ -167,7 +173,7 @@ impl OcrDetector {
     /// Classify text orientation (0° or 180°) and rotate if needed.
     /// Returns `(image, was_rotated)` — `was_rotated` is true when the text
     /// was detected as upside-down and the image was flipped 180°.
-    pub fn classify_and_rotate(&self, img: &DynamicImage) -> Result<(DynamicImage, bool), String> {
+    pub async fn classify_and_rotate(&self, img: &DynamicImage) -> Result<(DynamicImage, bool), String> {
         let resized = img.resize_exact(192, 48, image::imageops::FilterType::CatmullRom);
         let rgb = resized.to_rgb8();
 
@@ -185,16 +191,22 @@ impl OcrDetector {
 
         let input_tensor =
             Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
-        let mut session = self.cls_session.lock().map_err(|e| format!("Lock: {e}"))?;
-        let outputs = session
-            .run(ort::inputs![input_tensor])
-            .map_err(|e| format!("Classification inference: {e}"))?;
+        let options =
+            ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let is_flipped: bool = {
+            let mut session = self.cls_session.lock().await;
+            let outputs = session
+                .run_async(ort::inputs![input_tensor], &options)
+                .map_err(|e| format!("Classification run_async: {e}"))?
+                .await
+                .map_err(|e| format!("Classification inference: {e}"))?;
+            let (_shape, cls_data) = outputs[0]
+                .try_extract_tensor::<f32>()
+                .map_err(|e| format!("Extract cls output: {e}"))?;
+            cls_data.len() >= 2 && cls_data[1] > cls_data[0] && cls_data[1] > 0.9
+        };
 
-        let (_shape, cls_data) = outputs[0]
-            .try_extract_tensor::<f32>()
-            .map_err(|e| format!("Extract cls output: {e}"))?;
-
-        if cls_data.len() >= 2 && cls_data[1] > cls_data[0] && cls_data[1] > 0.9 {
+        if is_flipped {
             Ok((img.rotate180(), true))
         } else {
             Ok((img.clone(), false))

@@ -2,7 +2,7 @@
 /// SCRFD (det_10g) for detection + ArcFace (w600k_r50) for recognition.
 /// Produces 512-dim face embeddings.
 use std::path::Path;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 
 use image::DynamicImage;
 use ndarray::Array4;
@@ -50,17 +50,17 @@ impl FaceService {
     }
 
     /// Detect faces and extract embeddings.
-    pub fn detect_faces(&self, img: &DynamicImage) -> Result<Vec<FaceDetection>, String> {
+    pub async fn detect_faces(&self, img: &DynamicImage) -> Result<Vec<FaceDetection>, String> {
         let (orig_w, orig_h) = (img.width(), img.height());
 
-        let raw_faces = self.detect(img)?;
+        let raw_faces = self.detect(img).await?;
         if raw_faces.is_empty() {
             return Ok(vec![]);
         }
 
         let mut results = Vec::new();
         for face in &raw_faces {
-            let embedding = self.extract_embedding(img, face)?;
+            let embedding = self.extract_embedding(img, face).await?;
             results.push(FaceDetection {
                 embedding,
                 x: face.x.max(0),
@@ -75,7 +75,7 @@ impl FaceService {
     }
 
     /// Run SCRFD face detection.
-    fn detect(&self, img: &DynamicImage) -> Result<Vec<RawFace>, String> {
+    async fn detect(&self, img: &DynamicImage) -> Result<Vec<RawFace>, String> {
         let target_size: usize = 640;
         let (orig_w, orig_h) = (img.width() as f32, img.height() as f32);
         let scale = (target_size as f32 / orig_w.max(orig_h)).min(1.0);
@@ -101,19 +101,24 @@ impl FaceService {
 
         let input_tensor =
             Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
-        let mut session = self.det_session.lock().map_err(|e| format!("Lock: {e}"))?;
-        let outputs = session
-            .run(ort::inputs![input_tensor])
-            .map_err(|e| format!("Face detection inference: {e}"))?;
-
-        let faces = parse_scrfd_outputs(&outputs, scale, 0.5)?;
+        let options =
+            ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let faces = {
+            let mut session = self.det_session.lock().await;
+            let outputs = session
+                .run_async(ort::inputs![input_tensor], &options)
+                .map_err(|e| format!("Face det run_async: {e}"))?
+                .await
+                .map_err(|e| format!("Face detection inference: {e}"))?;
+            parse_scrfd_outputs(&outputs, scale, 0.5)?
+        };
         let faces = nms(faces, 0.4);
 
         Ok(faces)
     }
 
     /// Extract 512-dim ArcFace embedding from a cropped face.
-    fn extract_embedding(
+    async fn extract_embedding(
         &self,
         img: &DynamicImage,
         face: &RawFace,
@@ -150,17 +155,20 @@ impl FaceService {
 
         let input_tensor =
             Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
-        let mut session = self.rec_session.lock().map_err(|e| format!("Lock: {e}"))?;
-        let outputs = session
-            .run(ort::inputs![input_tensor])
-            .map_err(|e| format!("Face rec inference: {e}"))?;
-
-        let (_shape, data) = outputs[0]
-            .try_extract_tensor::<f32>()
-            .map_err(|e| format!("Extract embedding: {e}"))?;
-
-        // L2 normalize the embedding
-        let raw: Vec<f32> = data.to_vec();
+        let options =
+            ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let raw: Vec<f32> = {
+            let mut session = self.rec_session.lock().await;
+            let outputs = session
+                .run_async(ort::inputs![input_tensor], &options)
+                .map_err(|e| format!("Face rec run_async: {e}"))?
+                .await
+                .map_err(|e| format!("Face rec inference: {e}"))?;
+            let (_shape, data) = outputs[0]
+                .try_extract_tensor::<f32>()
+                .map_err(|e| format!("Extract embedding: {e}"))?;
+            data.to_vec()
+        };
         let norm: f32 = raw.iter().map(|v| v * v).sum::<f32>().sqrt();
         if norm > 0.0 {
             Ok(raw.iter().map(|v| v / norm).collect())

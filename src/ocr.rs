@@ -6,10 +6,10 @@
 /// is retained below but currently unused — no production-ready attention ONNX model
 /// exists yet. When one becomes available, re-enable by loading `attn_rec_session`
 /// and routing through `recognize_text_attention` in `recognize_text`.
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 
 use image::DynamicImage;
-use ndarray::Array4;
+use ndarray::{s, Array4};
 use ort::{session::Session, value::Tensor};
 
 use crate::ocr_backend::{OcrBackend, PaddleOcrVariant};
@@ -118,223 +118,311 @@ impl OcrService {
         })
     }
 
-    fn recognize_impl(&self, img: &DynamicImage) -> Result<Vec<OcrItem>, String> {
+    async fn recognize_impl(&self, img: &DynamicImage) -> Result<Vec<OcrItem>, String> {
         let (orig_w, orig_h) = (img.width(), img.height());
         if orig_w > 10000 || orig_h > 10000 {
             return Err("Image too large".into());
         }
 
+        // Prepared crop: all data needed after detection+classification to feed the rec model.
+        struct PreparedCrop {
+            /// Preprocessed CHW f32 tensor for this crop (3 × 48 × w).
+            tensor: Array4<f32>,
+            bbox: TextBox,
+            angle_deg: f32,
+            corners: Option<[(f32, f32); 4]>,
+        }
+
+        let mut prepared: Vec<PreparedCrop> = Vec::new();
+
         match self.detection_mode {
             DetectionMode::Components => {
-                let boxes = self.detector.detect(img)?;
-                if boxes.is_empty() {
-                    return Ok(vec![]);
-                }
-
-                let mut results = Vec::new();
-                for bbox in &boxes {
-                    let cropped = ocr_detector::crop_text_region(img, bbox);
+                let boxes = self.detector.detect(img).await?;
+                for bbox in boxes {
+                    let cropped = ocr_detector::crop_text_region(img, &bbox);
                     if cropped.width() < 2 || cropped.height() < 2 {
                         continue;
                     }
-                    let (rotated, was_flipped) = self.detector.classify_and_rotate(&cropped)?;
-                    if let Some(mut item) = self.recognize_text(&rotated, bbox)? {
-                        if was_flipped {
-                            item.angle = 180.0;
-                        }
-                        results.push(item);
+                    let (rotated, was_flipped) =
+                        self.detector.classify_and_rotate(&cropped).await?;
+                    if let Some(tensor) = preprocess_for_rec(&rotated) {
+                        prepared.push(PreparedCrop {
+                            tensor,
+                            bbox,
+                            angle_deg: if was_flipped { 180.0 } else { 0.0 },
+                            corners: None,
+                        });
                     }
                 }
-
-                ocr_detector::assign_paragraph_ids(&mut results);
-                Ok(results)
             }
             DetectionMode::Contours => {
-                let rboxes = self.detector.detect_with_contours(img)?;
-                if rboxes.is_empty() {
-                    return Ok(vec![]);
-                }
-
-                let mut results = Vec::new();
-                for rbox in &rboxes {
-                    let cropped = ocr_detector::crop_rotated_text_region(img, rbox);
+                let rboxes = self.detector.detect_with_contours(img).await?;
+                for rbox in rboxes {
+                    let cropped = ocr_detector::crop_rotated_text_region(img, &rbox);
                     if cropped.width() < 2 || cropped.height() < 2 {
                         continue;
                     }
-                    let (rotated, was_flipped) = self.detector.classify_and_rotate(&cropped)?;
-
-                    // Use the rotated rect's center/size/angle directly
-                    let tbox = TextBox {
+                    let (rotated, was_flipped) =
+                        self.detector.classify_and_rotate(&cropped).await?;
+                    let mut angle_deg = rbox.angle.to_degrees();
+                    if was_flipped {
+                        angle_deg += 180.0;
+                    }
+                    let bbox = TextBox {
                         x: rbox.center.0 - rbox.size.0 / 2.0,
                         y: rbox.center.1 - rbox.size.1 / 2.0,
                         w: rbox.size.0,
                         h: rbox.size.1,
                     };
-                    let mut angle_deg = rbox.angle.to_degrees();
-                    if was_flipped {
-                        angle_deg += 180.0;
-                    }
-
-                    if let Some(mut item) = self.recognize_text(&rotated, &tbox)? {
-                        item.angle = angle_deg;
-                        item.corners = Some(rbox.corners);
-                        results.push(item);
+                    if let Some(tensor) = preprocess_for_rec(&rotated) {
+                        prepared.push(PreparedCrop {
+                            tensor,
+                            bbox,
+                            angle_deg,
+                            corners: Some(rbox.corners),
+                        });
                     }
                 }
-
-                ocr_detector::assign_paragraph_ids(&mut results);
-                Ok(results)
             }
         }
-    }
 
-    /// Recognize text from a cropped, oriented text region using CTC decoding.
-    fn recognize_text(
-        &self,
-        img: &DynamicImage,
-        bbox: &TextBox,
-    ) -> Result<Option<OcrItem>, String> {
-        self.recognize_text_ctc(img, bbox)
-    }
+        if prepared.is_empty() {
+            return Ok(vec![]);
+        }
 
-    /// CTC-based recognition (fast, coarse character positioning).
-    fn recognize_text_ctc(
-        &self,
-        img: &DynamicImage,
-        bbox: &TextBox,
-    ) -> Result<Option<OcrItem>, String> {
-        // Detect dark background: convert to grayscale first, then invert.
-        let img = {
-            let gray = img.to_luma8();
-            let (gw, gh) = gray.dimensions();
-            let total: f64 = gray.pixels().map(|p| p.0[0] as f64).sum();
-            let avg_lum = total / (gw as f64 * gh as f64);
-            if avg_lum < 127.0 {
-                let mut gray = gray;
-                image::imageops::invert(&mut gray);
-                DynamicImage::ImageLuma8(gray)
-            } else {
-                img.clone()
-            }
+        // --- Single batched inference call ---
+        // All crops are padded to max_w with zeros (same as PaddleOCR's official batch impl).
+        // ORT's per-call overhead outweighs the padding cost; one call is faster than N buckets.
+        let n = prepared.len();
+        let max_w = prepared
+            .iter()
+            .map(|p| p.tensor.shape()[3])
+            .max()
+            .unwrap_or(1);
+
+        let mut batch = Array4::<f32>::zeros((n, 3, 48, max_w));
+        for (i, p) in prepared.iter().enumerate() {
+            let w = p.tensor.shape()[3];
+            batch
+                .slice_mut(s![i, .., .., ..w])
+                .assign(&p.tensor.slice(s![0, .., .., ..]));
+        }
+
+        let batch_tensor =
+            Tensor::from_array(batch).map_err(|e| format!("Batch tensor: {e}"))?;
+        let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let rec_array: ndarray::ArrayD<f32> = {
+            let mut session = self.rec_session.lock().await;
+            let outputs = session
+                .run_async(ort::inputs![batch_tensor], &options)
+                .map_err(|e| format!("Recognition run_async: {e}"))?
+                .await
+                .map_err(|e| format!("Recognition inference: {e}"))?;
+            outputs[0]
+                .try_extract_array::<f32>()
+                .map_err(|e| format!("Extract rec output: {e}"))?
+                .to_owned()
         };
 
-        let (w, h) = (img.width(), img.height());
-        let target_h = 48u32;
-        let target_w = ((w as f32 / h as f32) * target_h as f32).max(1.0) as u32;
-        let target_w = target_w.min(2048);
-
-        let resized =
-            img.resize_exact(target_w, target_h, image::imageops::FilterType::CatmullRom);
-
-        let rgb = resized.to_rgb8();
-
-        let mean = [0.5f32, 0.5, 0.5];
-        let std = [0.5f32, 0.5, 0.5];
-        let mut tensor =
-            Array4::<f32>::zeros((1, 3, target_h as usize, target_w as usize));
-        for y in 0..target_h as usize {
-            for x in 0..target_w as usize {
-                let pixel = rgb.get_pixel(x as u32, y as u32);
-                for c in 0..3 {
-                    tensor[[0, c, y, x]] = (pixel[c] as f32 / 255.0 - mean[c]) / std[c];
-                }
+        let mut results = Vec::new();
+        for (i, prep) in prepared.into_iter().enumerate() {
+            let item_view = rec_array.slice(s![i, .., ..]);
+            let shape = item_view.shape();
+            if shape.len() < 2 {
+                continue;
+            }
+            if let Some(mut item) = ctc_decode(
+                item_view.view(),
+                shape[0],
+                shape[1],
+                &self.char_dict,
+                &prep.bbox,
+            ) {
+                item.angle = prep.angle_deg;
+                item.corners = prep.corners;
+                results.push(item);
             }
         }
+
+        ocr_detector::assign_paragraph_ids(&mut results);
+        Ok(results)
+    }
+
+    /// Kept for possible future use (single-crop path).
+    #[allow(dead_code)]
+    async fn recognize_text(
+        &self,
+        img: &DynamicImage,
+        bbox: &TextBox,
+    ) -> Result<Option<OcrItem>, String> {
+        self.recognize_text_ctc(img, bbox).await
+    }
+
+    #[allow(dead_code)]
+    async fn recognize_text_ctc(
+        &self,
+        img: &DynamicImage,
+        bbox: &TextBox,
+    ) -> Result<Option<OcrItem>, String> {
+        let tensor = match preprocess_for_rec(img) {
+            Some(t) => t,
+            None => return Ok(None),
+        };
 
         let input_tensor =
             Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
-        let mut session = self.rec_session.lock().map_err(|e| format!("Lock: {e}"))?;
-        let outputs = session
-            .run(ort::inputs![input_tensor])
-            .map_err(|e| format!("Recognition inference: {e}"))?;
+        let options =
+            ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let rec_array: ndarray::ArrayD<f32> = {
+            let mut session = self.rec_session.lock().await;
+            let outputs = session
+                .run_async(ort::inputs![input_tensor], &options)
+                .map_err(|e| format!("Recognition run_async: {e}"))?
+                .await
+                .map_err(|e| format!("Recognition inference: {e}"))?;
+            outputs[0]
+                .try_extract_array::<f32>()
+                .map_err(|e| format!("Extract rec output: {e}"))?
+                .to_owned()
+        };
 
-        let rec_view = outputs[0]
-            .try_extract_array::<f32>()
-            .map_err(|e| format!("Extract rec output: {e}"))?;
-
-        let shape = rec_view.shape();
+        let view = rec_array.view();
+        let shape = view.shape();
         if shape.len() < 3 {
             return Ok(None);
         }
         let seq_len = shape[1];
         let vocab_size = shape[2];
-
-        // CTC greedy decode with timestep-to-character alignment
-        let mut text = String::new();
-        let mut total_score = 0.0f32;
-        let mut count = 0;
-        let mut last_idx: i64 = 0; // blank
-        let mut char_timesteps: Vec<(usize, usize)> = Vec::new();
-        let mut current_char_start: usize = 0;
-
-        for t in 0..seq_len {
-            let mut max_idx = 0;
-            let mut max_val = f32::NEG_INFINITY;
-            for v in 0..vocab_size {
-                let val = rec_view[[0, t, v]];
-                if val > max_val {
-                    max_val = val;
-                    max_idx = v as i64;
-                }
-            }
-
-            if max_idx != 0 && max_idx != last_idx {
-                if let Some(ch) = self.char_dict.get(max_idx as usize) {
-                    text.push_str(ch);
-                    total_score += max_val.exp() / (1.0 + max_val.exp());
-                    count += 1;
-                    char_timesteps.push((current_char_start, t));
-                }
-                current_char_start = t;
-            } else if max_idx == 0 && last_idx != 0 {
-                current_char_start = t + 1;
-            }
-            last_idx = max_idx;
-        }
-
-        if text.is_empty() {
-            return Ok(None);
-        }
-
-        let avg_score = if count > 0 {
-            total_score / count as f32
-        } else {
-            0.0
-        };
-
-        let step_w = bbox.w / seq_len as f32;
-        let char_positions: Vec<(f32, f32)> = char_timesteps
-            .iter()
-            .map(|&(start_t, end_t)| {
-                let cx = start_t as f32 * step_w;
-                let cw = (end_t - start_t + 1) as f32 * step_w;
-                (cx, cw)
-            })
-            .collect();
-
-        Ok(Some(OcrItem {
-            text,
-            score: avg_score,
-            x: bbox.x,
-            y: bbox.y,
-            w: bbox.w,
-            h: bbox.h,
-            angle: 0.0,
-            corners: None,
-            paragraph_id: 0,
-            char_positions: Some(char_positions),
-        }))
+        Ok(ctc_decode(
+            view.slice(s![0, .., ..]),
+            seq_len,
+            vocab_size,
+            &self.char_dict,
+            bbox,
+        ))
     }
 }
 
+#[async_trait::async_trait]
 impl OcrBackend for OcrService {
     fn name(&self) -> &str {
         &self.variant_name
     }
 
-    fn recognize(&self, img: &DynamicImage) -> Result<Vec<OcrItem>, String> {
-        self.recognize_impl(img)
+    async fn recognize(&self, img: &DynamicImage) -> Result<Vec<OcrItem>, String> {
+        self.recognize_impl(img).await
     }
+}
+
+/// Preprocess a text-region crop for the rec model.
+/// Returns `(1, 3, 48, target_w)` f32 tensor, or None if the crop is too small.
+fn preprocess_for_rec(img: &DynamicImage) -> Option<Array4<f32>> {
+    let (w, h) = (img.width(), img.height());
+    if w < 2 || h < 2 {
+        return None;
+    }
+
+    // Invert if dark background
+    let img = {
+        let gray = img.to_luma8();
+        let (gw, gh) = gray.dimensions();
+        let avg_lum: f64 =
+            gray.pixels().map(|p| p.0[0] as f64).sum::<f64>() / (gw as f64 * gh as f64);
+        if avg_lum < 127.0 {
+            let mut g = gray;
+            image::imageops::invert(&mut g);
+            DynamicImage::ImageLuma8(g)
+        } else {
+            img.clone()
+        }
+    };
+
+    let target_h = 48u32;
+    let target_w = ((img.width() as f32 / img.height() as f32) * target_h as f32)
+        .max(1.0) as u32;
+    let target_w = target_w.min(2048);
+
+    let resized = img.resize_exact(target_w, target_h, image::imageops::FilterType::CatmullRom);
+    let rgb = resized.to_rgb8();
+
+    let mean = [0.5f32; 3];
+    let std = [0.5f32; 3];
+    let mut tensor = Array4::<f32>::zeros((1, 3, target_h as usize, target_w as usize));
+    for y in 0..target_h as usize {
+        for x in 0..target_w as usize {
+            let pixel = rgb.get_pixel(x as u32, y as u32);
+            for c in 0..3 {
+                tensor[[0, c, y, x]] = (pixel[c] as f32 / 255.0 - mean[c]) / std[c];
+            }
+        }
+    }
+    Some(tensor)
+}
+
+/// CTC greedy decode for a single sequence slice `[seq_len, vocab_size]`.
+fn ctc_decode(
+    view: ndarray::ArrayView2<f32>,
+    seq_len: usize,
+    vocab_size: usize,
+    char_dict: &[String],
+    bbox: &TextBox,
+) -> Option<OcrItem> {
+    let mut text = String::new();
+    let mut total_score = 0.0f32;
+    let mut count = 0usize;
+    let mut last_idx: i64 = 0;
+    let mut char_timesteps: Vec<(usize, usize)> = Vec::new();
+    let mut current_char_start: usize = 0;
+
+    for t in 0..seq_len {
+        let mut max_idx = 0i64;
+        let mut max_val = f32::NEG_INFINITY;
+        for v in 0..vocab_size {
+            let val = view[[t, v]];
+            if val > max_val {
+                max_val = val;
+                max_idx = v as i64;
+            }
+        }
+        if max_idx != 0 && max_idx != last_idx {
+            if let Some(ch) = char_dict.get(max_idx as usize) {
+                text.push_str(ch);
+                total_score += max_val.exp() / (1.0 + max_val.exp());
+                count += 1;
+                char_timesteps.push((current_char_start, t));
+            }
+            current_char_start = t;
+        } else if max_idx == 0 && last_idx != 0 {
+            current_char_start = t + 1;
+        }
+        last_idx = max_idx;
+    }
+
+    if text.is_empty() {
+        return None;
+    }
+
+    let avg_score = if count > 0 { total_score / count as f32 } else { 0.0 };
+    let step_w = bbox.w / seq_len as f32;
+    let char_positions = char_timesteps
+        .iter()
+        .map(|&(start_t, end_t)| {
+            (start_t as f32 * step_w, (end_t - start_t + 1) as f32 * step_w)
+        })
+        .collect();
+
+    Some(OcrItem {
+        text,
+        score: avg_score,
+        x: bbox.x,
+        y: bbox.y,
+        w: bbox.w,
+        h: bbox.h,
+        angle: 0.0,
+        corners: None,
+        paragraph_id: 0,
+        char_positions: Some(char_positions),
+    })
 }
 
 fn load_session(path: &str) -> Result<Session, String> {

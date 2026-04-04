@@ -37,10 +37,16 @@ use tokio::sync::{OnceCell, RwLock};
 /// How long an idle model stays in memory before eviction.
 const MODEL_IDLE_TIMEOUT: Duration = Duration::from_secs(180); // 3 minutes
 
-/// Max intra-op threads for ONNX Runtime sessions.
-/// Leaving this unlimited (defaulting to all CPU cores) causes deadlocks
-/// during graph optimization on high-core-count systems.
-const ORT_INTRA_OP_THREADS: usize = 4;
+/// Max intra-op threads per ONNX Runtime session.
+/// Use half the logical CPUs (min 4, max 16) — sweet spot for parallel CPU inference.
+/// The old deadlock risk (with std::sync::Mutex + blocking) is gone now that all
+/// inference uses tokio::sync::Mutex + run_async.
+fn ort_intra_op_threads() -> usize {
+    let cpus = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    (cpus / 2).clamp(4, 16)
+}
 
 /// Build an ONNX Runtime session from a model file.
 /// When CUDA is enabled, attempts to register the CUDA execution provider.
@@ -55,7 +61,7 @@ pub fn build_session(path: impl AsRef<std::path::Path>) -> ort::Result<ort::sess
     if ENABLE_CUDA.load(Ordering::Relaxed) {
         tracing::info!("[ort] Building session for {filename} with CUDA EP");
         match Session::builder()?
-            .with_intra_threads(ORT_INTRA_OP_THREADS)?
+            .with_intra_threads(ort_intra_op_threads())?
             .with_execution_providers([ort::ep::CUDA::default().build().error_on_failure()])
         {
             Ok(mut builder) => {
@@ -68,14 +74,14 @@ pub fn build_session(path: impl AsRef<std::path::Path>) -> ort::Result<ort::sess
                     "[ort] CUDA EP registration failed for {filename}: {e} — falling back to CPU"
                 );
                 Session::builder()?
-                    .with_intra_threads(ORT_INTRA_OP_THREADS)?
+                    .with_intra_threads(ort_intra_op_threads())?
                     .commit_from_file(path)
             }
         }
     } else {
         tracing::info!("[ort] Building session for {filename} (CPU only)");
         Session::builder()?
-            .with_intra_threads(ORT_INTRA_OP_THREADS)?
+            .with_intra_threads(ort_intra_op_threads())?
             .commit_from_file(path)
     }
 }
@@ -451,7 +457,7 @@ impl AiService {
         let img =
             image::load_from_memory(image_bytes).map_err(|e| format!("Invalid image: {e}"))?;
         let svc = self.get_or_init_clip().await?;
-        svc.embed_image(&img)
+        svc.embed_image(&img).await
     }
 
     /// Embed text → 512-dim CLIP vector.
@@ -460,7 +466,7 @@ impl AiService {
             return Err("CLIP is disabled".into());
         }
         let svc = self.get_or_init_clip().await?;
-        svc.embed_text(text)
+        svc.embed_text(text).await
     }
 
     /// Classify an image vector against the built-in taxonomy using CLIP zero-shot.
@@ -487,7 +493,12 @@ impl AiService {
         if let Some(svc) = guard.as_ref() {
             return Ok(Arc::clone(svc));
         }
-        let svc = Arc::new(clip::ClipService::new(&self.config.models_dir)?);
+        let dir = self.config.models_dir.clone();
+        let svc = Arc::new(
+            tokio::task::spawn_blocking(move || clip::ClipService::new(&dir))
+                .await
+                .map_err(|e| format!("CLIP load panicked: {e}"))??
+        );
         *guard = Some(Arc::clone(&svc));
         Ok(svc)
     }
@@ -505,7 +516,7 @@ impl AiService {
         let img =
             image::load_from_memory(image_bytes).map_err(|e| format!("Invalid image: {e}"))?;
         let svc = self.get_or_init_face().await?;
-        svc.detect_faces(&img)
+        svc.detect_faces(&img).await
     }
 
     async fn get_or_init_face(&self) -> Result<Arc<face::FaceService>, String> {
@@ -520,7 +531,12 @@ impl AiService {
         if let Some(svc) = guard.as_ref() {
             return Ok(Arc::clone(svc));
         }
-        let svc = Arc::new(face::FaceService::new(&self.config.models_dir)?);
+        let dir = self.config.models_dir.clone();
+        let svc = Arc::new(
+            tokio::task::spawn_blocking(move || face::FaceService::new(&dir))
+                .await
+                .map_err(|e| format!("Face load panicked: {e}"))??
+        );
         *guard = Some(Arc::clone(&svc));
         Ok(svc)
     }
@@ -566,7 +582,12 @@ impl AiService {
         if let Some(svc) = guard.as_ref() {
             return Ok(svc.clone());
         }
-        let svc = stt::SttService::new(&self.config.models_dir, stt::DEFAULT_MODEL)?;
+        let dir = self.config.models_dir.clone();
+        let svc = tokio::task::spawn_blocking(move || {
+            stt::SttService::new(&dir, stt::DEFAULT_MODEL)
+        })
+        .await
+        .map_err(|e| format!("STT load panicked: {e}"))??;
         *guard = Some(svc.clone());
         Ok(svc)
     }
@@ -607,7 +628,12 @@ impl AiService {
         if let Some(svc) = guard.as_ref() {
             return Ok(svc.clone());
         }
-        let svc = stt::StreamingSttService::new(&self.config.models_dir)?;
+        let dir = self.config.models_dir.clone();
+        let svc = tokio::task::spawn_blocking(move || {
+            stt::StreamingSttService::new(&dir)
+        })
+        .await
+        .map_err(|e| format!("Streaming STT load panicked: {e}"))??;
         *guard = Some(svc.clone());
         Ok(svc)
     }

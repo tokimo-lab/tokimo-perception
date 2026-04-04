@@ -37,6 +37,11 @@ use tokio::sync::{OnceCell, RwLock};
 /// How long an idle model stays in memory before eviction.
 const MODEL_IDLE_TIMEOUT: Duration = Duration::from_secs(180); // 3 minutes
 
+/// Max intra-op threads for ONNX Runtime sessions.
+/// Leaving this unlimited (defaulting to all CPU cores) causes deadlocks
+/// during graph optimization on high-core-count systems.
+const ORT_INTRA_OP_THREADS: usize = 4;
+
 /// Build an ONNX Runtime session from a model file.
 /// When CUDA is enabled, attempts to register the CUDA execution provider.
 /// If CUDA EP registration fails (e.g. driver mismatch), falls back to CPU
@@ -49,9 +54,8 @@ pub fn build_session(path: impl AsRef<std::path::Path>) -> ort::Result<ort::sess
 
     if ENABLE_CUDA.load(Ordering::Relaxed) {
         tracing::info!("[ort] Building session for {filename} with CUDA EP");
-        // Use error_on_failure so we know if CUDA EP actually worked.
-        // If it fails, log the error and fall back to CPU explicitly.
         match Session::builder()?
+            .with_intra_threads(ORT_INTRA_OP_THREADS)?
             .with_execution_providers([ort::ep::CUDA::default().build().error_on_failure()])
         {
             Ok(mut builder) => {
@@ -63,12 +67,16 @@ pub fn build_session(path: impl AsRef<std::path::Path>) -> ort::Result<ort::sess
                 tracing::warn!(
                     "[ort] CUDA EP registration failed for {filename}: {e} — falling back to CPU"
                 );
-                Session::builder()?.commit_from_file(path)
+                Session::builder()?
+                    .with_intra_threads(ORT_INTRA_OP_THREADS)?
+                    .commit_from_file(path)
             }
         }
     } else {
         tracing::info!("[ort] Building session for {filename} (CPU only)");
-        Session::builder()?.commit_from_file(path)
+        Session::builder()?
+            .with_intra_threads(ORT_INTRA_OP_THREADS)?
+            .commit_from_file(path)
     }
 }
 

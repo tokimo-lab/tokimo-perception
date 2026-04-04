@@ -201,39 +201,54 @@ impl OcrManager {
             }
         }
 
-        // Slow path: write lock + double-check
+        // Slow path: load model in spawn_blocking to avoid blocking the
+        // tokio async runtime (ONNX session building is CPU-intensive).
+        let models_dir = self.models_dir.clone();
+        let det_max_side = self.det_max_side;
+        let name = model_name.to_string();
+
+        let backend = tokio::task::spawn_blocking(move || {
+            create_backend_sync(&name, &models_dir, det_max_side)
+        })
+        .await
+        .map_err(|e| format!("Backend init task panicked: {e}"))??;
+
+        // Write lock + double-check (another task may have loaded it concurrently)
         let mut guard = slot.write().await;
-        if let Some(backend) = guard.as_ref() {
-            return Ok(Arc::clone(backend));
+        if let Some(existing) = guard.as_ref() {
+            return Ok(Arc::clone(existing));
         }
-        let backend = self.create_backend(model_name)?;
         *guard = Some(Arc::clone(&backend));
         Ok(backend)
     }
+}
 
-    fn create_backend(&self, model_name: &str) -> Result<Arc<dyn OcrBackend>, String> {
-        let ms = self.det_max_side;
-        match model_name {
-            MODEL_PP_OCRV5_MOBILE => {
-                let svc = crate::ocr::OcrService::new_with_options(
-                    &self.models_dir,
-                    PaddleOcrVariant::Mobile,
-                    crate::ocr::DetectionMode::Components,
-                    ms,
-                )?;
-                Ok(Arc::new(svc))
-            }
-            MODEL_RAPID_OCR_RUST => {
-                let svc = crate::ocr::OcrService::new_with_options(
-                    &self.models_dir,
-                    PaddleOcrVariant::Server,
-                    crate::ocr::DetectionMode::Contours,
-                    ms,
-                )?;
-                Ok(Arc::new(svc))
-            }
-            _ => Err(format!("Unknown OCR model: {model_name}")),
+/// Create an OCR backend synchronously (called from `spawn_blocking`).
+fn create_backend_sync(
+    model_name: &str,
+    models_dir: &str,
+    det_max_side: Option<u32>,
+) -> Result<Arc<dyn OcrBackend>, String> {
+    match model_name {
+        MODEL_PP_OCRV5_MOBILE => {
+            let svc = crate::ocr::OcrService::new_with_options(
+                models_dir,
+                PaddleOcrVariant::Mobile,
+                crate::ocr::DetectionMode::Components,
+                det_max_side,
+            )?;
+            Ok(Arc::new(svc))
         }
+        MODEL_RAPID_OCR_RUST => {
+            let svc = crate::ocr::OcrService::new_with_options(
+                models_dir,
+                PaddleOcrVariant::Server,
+                crate::ocr::DetectionMode::Contours,
+                det_max_side,
+            )?;
+            Ok(Arc::new(svc))
+        }
+        _ => Err(format!("Unknown OCR model: {model_name}")),
     }
 }
 

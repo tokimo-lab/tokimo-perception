@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::ocr::OcrItem;
 use crate::ocr_backend::{OcrBackend, PaddleOcrVariant};
@@ -28,11 +28,32 @@ pub struct OcrModelInfo {
     pub loaded: bool,
 }
 
+/// Per-backend lazy-init slot.
+///
+/// `init_lock` serializes initialization — at most one caller runs the
+/// (expensive) ONNX model load at a time. All other concurrent callers wait
+/// on the lock and get the already-loaded backend via the double-check inside
+/// `get_or_init_backend`. This prevents the race where two concurrent
+/// requests both see `None` in the fast-path and both kick off a load.
+struct BackendSlot {
+    backend: RwLock<Option<Arc<dyn OcrBackend>>>,
+    init_lock: Mutex<()>,
+}
+
+impl BackendSlot {
+    fn new() -> Self {
+        Self {
+            backend: RwLock::new(None),
+            init_lock: Mutex::new(()),
+        }
+    }
+}
+
 /// Routes OCR requests to the appropriate backend. Backends are lazy-loaded
 /// and can be evicted to free memory after idle timeout.
 pub struct OcrManager {
     models_dir: String,
-    backends: HashMap<&'static str, RwLock<Option<Arc<dyn OcrBackend>>>>,
+    backends: HashMap<&'static str, BackendSlot>,
     sidecar_url: Option<String>,
     last_use: AtomicU64,
     /// Detection resolution limit (longest side in pixels).
@@ -57,10 +78,9 @@ impl OcrManager {
         sidecar_url: Option<String>,
         det_max_side: Option<u32>,
     ) -> Self {
-        let mut backends: HashMap<&'static str, RwLock<Option<Arc<dyn OcrBackend>>>> =
-            HashMap::new();
-        backends.insert(MODEL_PP_OCRV5_MOBILE, RwLock::new(None));
-        backends.insert(MODEL_RAPID_OCR_RUST, RwLock::new(None));
+        let mut backends: HashMap<&'static str, BackendSlot> = HashMap::new();
+        backends.insert(MODEL_PP_OCRV5_MOBILE, BackendSlot::new());
+        backends.insert(MODEL_RAPID_OCR_RUST, BackendSlot::new());
         // VLM models (GOT-OCR-2) are handled via HTTP sidecar, not backends
         Self {
             models_dir,
@@ -129,7 +149,7 @@ impl OcrManager {
     pub async fn evict_all(&self) {
         let mut evicted = 0usize;
         for (name, slot) in &self.backends {
-            let mut guard = slot.write().await;
+            let mut guard = slot.backend.write().await;
             if guard.is_some() {
                 *guard = None;
                 tracing::info!("Evicted OCR backend: {name}");
@@ -174,14 +194,14 @@ impl OcrManager {
     fn is_loaded(&self, model: &str) -> bool {
         self.backends
             .get(model)
-            .is_some_and(|slot| slot.try_read().is_ok_and(|g| g.is_some()))
+            .is_some_and(|slot| slot.backend.try_read().is_ok_and(|g| g.is_some()))
     }
 
     /// Whether any OCR backend is currently loaded in memory.
     pub fn has_loaded_backends(&self) -> bool {
         self.backends
             .values()
-            .any(|slot| slot.try_read().is_ok_and(|g| g.is_some()))
+            .any(|slot| slot.backend.try_read().is_ok_and(|g| g.is_some()))
     }
 
     async fn get_or_init_backend(
@@ -193,16 +213,27 @@ impl OcrManager {
             .get(model_name)
             .ok_or_else(|| format!("Unknown OCR model: {model_name}"))?;
 
-        // Fast path: read lock
+        // Fast path: read lock, backend already loaded
         {
-            let guard = slot.read().await;
+            let guard = slot.backend.read().await;
             if let Some(backend) = guard.as_ref() {
                 return Ok(Arc::clone(backend));
             }
         }
 
-        // Slow path: load model in spawn_blocking to avoid blocking the
-        // tokio async runtime (ONNX session building is CPU-intensive).
+        // Slow path: acquire init_lock so only one caller runs the load.
+        // All other concurrent callers block here and will hit the
+        // double-check below once the first caller is done.
+        let _init = slot.init_lock.lock().await;
+
+        // Double-check: another caller may have loaded while we waited.
+        {
+            let guard = slot.backend.read().await;
+            if let Some(backend) = guard.as_ref() {
+                return Ok(Arc::clone(backend));
+            }
+        }
+
         let models_dir = self.models_dir.clone();
         let det_max_side = self.det_max_side;
         let name = model_name.to_string();
@@ -213,12 +244,7 @@ impl OcrManager {
         .await
         .map_err(|e| format!("Backend init task panicked: {e}"))??;
 
-        // Write lock + double-check (another task may have loaded it concurrently)
-        let mut guard = slot.write().await;
-        if let Some(existing) = guard.as_ref() {
-            return Ok(Arc::clone(existing));
-        }
-        *guard = Some(Arc::clone(&backend));
+        *slot.backend.write().await = Some(Arc::clone(&backend));
         Ok(backend)
     }
 }

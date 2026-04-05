@@ -285,6 +285,7 @@ impl AiService {
         if evicted_any {
             #[cfg(target_os = "linux")]
             {
+                #[allow(unsafe_code)]
                 unsafe { libc::malloc_trim(0) };
                 tracing::info!("Called malloc_trim to release memory to OS");
             }

@@ -179,6 +179,7 @@ impl OcrManager {
         }
         if evicted > 0 {
             #[cfg(target_os = "linux")]
+            #[allow(unsafe_code)]
             unsafe {
                 libc::malloc_trim(0);
             }

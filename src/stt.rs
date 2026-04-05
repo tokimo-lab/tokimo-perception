@@ -5,6 +5,8 @@
 //! - **Streaming** (Zipformer OnlineRecognizer): real-time partial results,
 //!   with `SenseVoice` refinement on detected endpoints.
 
+#![allow(unsafe_code)]
+
 use std::path::Path;
 use std::sync::Arc;
 

@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 description = "OCR + CLIP + Face recognition + STT via ONNX Runtime / sherpa-onnx (library)"
 
-[workspace]
 
 [lib]
 name = "rust_models"

@@ -146,7 +146,7 @@ impl OcrManager {
 
     /// Hybrid OCR: use `det_model` for bounding-box detection, `vlm_model` for
     /// accurate text recognition, then merge via sidecar.
-    /// Returns (merged_items, optional_debug_info).
+    /// Returns (`merged_items`, `optional_debug_info`).
     pub async fn ocr_hybrid(
         &self,
         det_model: &str,
@@ -215,12 +215,12 @@ impl OcrManager {
     fn is_loaded(&self, model: &str) -> bool {
         self.backends
             .get(model)
-            .is_some_and(|slot| slot.is_loaded())
+            .is_some_and(BackendSlot::is_loaded)
     }
 
     /// Whether any OCR backend is currently loaded in memory.
     pub fn has_loaded_backends(&self) -> bool {
-        self.backends.values().any(|slot| slot.is_loaded())
+        self.backends.values().any(BackendSlot::is_loaded)
     }
 
     async fn get_or_init_backend(
@@ -333,10 +333,10 @@ async fn vlm_ocr_via_sidecar(
             score: b.score as f32,
             // Use -1.0 sentinel when sidecar returns null coordinates
             // (e.g. GOT-OCR which doesn't provide bounding boxes)
-            x: b.x.map(|v| v as f32).unwrap_or(-1.0),
-            y: b.y.map(|v| v as f32).unwrap_or(-1.0),
-            w: b.w.map(|v| v as f32).unwrap_or(-1.0),
-            h: b.h.map(|v| v as f32).unwrap_or(-1.0),
+            x: b.x.map_or(-1.0, |v| v as f32),
+            y: b.y.map_or(-1.0, |v| v as f32),
+            w: b.w.map_or(-1.0, |v| v as f32),
+            h: b.h.map_or(-1.0, |v| v as f32),
             angle: 0.0,
             corners: None,
             paragraph_id: b.paragraph_id,
@@ -359,7 +359,7 @@ struct SidecarDetBlock {
     paragraph_id: u32,
 }
 
-/// Call the sidecar `/ocr/hybrid` endpoint: send det_blocks + image,
+/// Call the sidecar `/ocr/hybrid` endpoint: send `det_blocks` + image,
 /// sidecar runs the VLM model and merges text with detection coordinates.
 async fn hybrid_ocr_via_sidecar(
     sidecar_url: &str,
@@ -417,10 +417,10 @@ async fn hybrid_ocr_via_sidecar(
         .map(|b| OcrItem {
             text: b.text,
             score: b.score as f32,
-            x: b.x.map(|v| v as f32).unwrap_or(-1.0),
-            y: b.y.map(|v| v as f32).unwrap_or(-1.0),
-            w: b.w.map(|v| v as f32).unwrap_or(-1.0),
-            h: b.h.map(|v| v as f32).unwrap_or(-1.0),
+            x: b.x.map_or(-1.0, |v| v as f32),
+            y: b.y.map_or(-1.0, |v| v as f32),
+            w: b.w.map_or(-1.0, |v| v as f32),
+            h: b.h.map_or(-1.0, |v| v as f32),
             angle: 0.0,
             corners: None,
             paragraph_id: b.paragraph_id,

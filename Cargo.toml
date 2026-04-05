@@ -45,3 +45,6 @@ futures-util = "0.3"
 # Model download
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "json"] }
 zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[lints]
+workspace = true

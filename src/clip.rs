@@ -1,6 +1,6 @@
 /// Chinese-CLIP ViT-B-16 service via ONNX Runtime.
 /// Image → 512-dim vector, Text → 512-dim vector.
-/// Also provides zero-shot classification via clip_categories taxonomy.
+/// Also provides zero-shot classification via `clip_categories` taxonomy.
 use std::path::Path;
 use std::sync::Mutex as StdMutex;
 use tokio::sync::Mutex;
@@ -17,8 +17,8 @@ const IMG_SIZE: u32 = 224;
 const CONTEXT_LENGTH: usize = 52;
 
 // ImageNet normalization (same as Chinese-CLIP)
-const MEAN: [f32; 3] = [0.48145466, 0.4578275, 0.40821073];
-const STD: [f32; 3] = [0.26862954, 0.261_302_6, 0.275_777_1];
+const MEAN: [f32; 3] = [0.481_454_66, 0.457_827_5, 0.408_210_73];
+const STD: [f32; 3] = [0.268_629_54, 0.261_302_6, 0.275_777_1];
 
 pub struct ClipService {
     img_session: Mutex<Session>,
@@ -29,8 +29,8 @@ pub struct ClipService {
 
 impl ClipService {
     pub fn new(models_dir: &str) -> Result<Self, String> {
-        let img_path = format!("{}/clip/vit-b-16.img.fp32.onnx", models_dir);
-        let txt_path = format!("{}/clip/vit-b-16.txt.fp32.onnx", models_dir);
+        let img_path = format!("{models_dir}/clip/vit-b-16.img.fp32.onnx");
+        let txt_path = format!("{models_dir}/clip/vit-b-16.txt.fp32.onnx");
 
         if !Path::new(&img_path).exists() {
             return Err(format!("CLIP image model not found: {img_path}"));
@@ -139,7 +139,7 @@ impl ClipService {
     }
 }
 
-/// Resize to 224×224, normalize with ImageNet mean/std, output NCHW f32 tensor.
+/// Resize to 224×224, normalize with `ImageNet` mean/std, output NCHW f32 tensor.
 fn preprocess_image(img: &DynamicImage) -> Array4<f32> {
     let resized = img.resize_exact(IMG_SIZE, IMG_SIZE, image::imageops::FilterType::CatmullRom);
     let rgb = resized.to_rgb8();
@@ -149,7 +149,7 @@ fn preprocess_image(img: &DynamicImage) -> Array4<f32> {
         for x in 0..IMG_SIZE as usize {
             let pixel = rgb.get_pixel(x as u32, y as u32);
             for c in 0..3 {
-                tensor[[0, c, y, x]] = (pixel[c] as f32 / 255.0 - MEAN[c]) / STD[c];
+                tensor[[0, c, y, x]] = (f32::from(pixel[c]) / 255.0 - MEAN[c]) / STD[c];
             }
         }
     }

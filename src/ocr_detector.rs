@@ -35,7 +35,7 @@ pub struct RotatedBox {
     pub score: f32,
 }
 
-/// Internal result from DBNet inference, shared by both detection modes.
+/// Internal result from `DBNet` inference, shared by both detection modes.
 struct DetectionOutput {
     prob_data: Vec<f32>,
     pad_w: usize,
@@ -86,7 +86,7 @@ impl OcrDetector {
         })
     }
 
-    /// Common DBNet inference — shared by both detection modes.
+    /// Common `DBNet` inference — shared by both detection modes.
     async fn run_dbnet(&self, img: &DynamicImage) -> Result<DetectionOutput, String> {
         let (orig_w, orig_h) = (img.width() as f32, img.height() as f32);
 
@@ -108,7 +108,7 @@ impl OcrDetector {
             for x in 0..new_w as usize {
                 let pixel = rgb.get_pixel(x as u32, y as u32);
                 for c in 0..3 {
-                    tensor[[0, c, y, x]] = (pixel[c] as f32 / 255.0 - mean[c]) / std[c];
+                    tensor[[0, c, y, x]] = (f32::from(pixel[c]) / 255.0 - mean[c]) / std[c];
                 }
             }
         }
@@ -141,7 +141,7 @@ impl OcrDetector {
         })
     }
 
-    /// Run DBNet text detection, return bounding boxes in original image coords.
+    /// Run `DBNet` text detection, return bounding boxes in original image coords.
     pub async fn detect(&self, img: &DynamicImage) -> Result<Vec<TextBox>, String> {
         let out = self.run_dbnet(img).await?;
         Ok(extract_boxes_from_prob_map(
@@ -155,7 +155,7 @@ impl OcrDetector {
         ))
     }
 
-    /// Run DBNet text detection with contour-based post-processing (RapidOCR-style).
+    /// Run `DBNet` text detection with contour-based post-processing (RapidOCR-style).
     /// Returns rotated bounding boxes for better results on angled text.
     pub async fn detect_with_contours(&self, img: &DynamicImage) -> Result<Vec<RotatedBox>, String> {
         let out = self.run_dbnet(img).await?;
@@ -184,7 +184,7 @@ impl OcrDetector {
             for x in 0..192 {
                 let pixel = rgb.get_pixel(x as u32, y as u32);
                 for c in 0..3 {
-                    tensor[[0, c, y, x]] = (pixel[c] as f32 / 255.0 - mean[c]) / std[c];
+                    tensor[[0, c, y, x]] = (f32::from(pixel[c]) / 255.0 - mean[c]) / std[c];
                 }
             }
         }
@@ -254,9 +254,8 @@ pub fn crop_rotated_text_region(img: &DynamicImage, rbox: &RotatedBox) -> Dynami
     ];
     let src = [tl, tr, br, bl];
 
-    let coeffs = match compute_perspective_transform(&dst, &src) {
-        Some(c) => c,
-        None => return DynamicImage::ImageRgb8(image::RgbImage::new(1, 1)),
+    let Some(coeffs) = compute_perspective_transform(&dst, &src) else {
+        return DynamicImage::ImageRgb8(image::RgbImage::new(1, 1));
     };
 
     let src_rgb = img.to_rgb8();
@@ -265,8 +264,8 @@ pub fn crop_rotated_text_region(img: &DynamicImage, rbox: &RotatedBox) -> Dynami
 
     for dy in 0..out_h {
         for dx in 0..out_w {
-            let u = dx as f64;
-            let v = dy as f64;
+            let u = f64::from(dx);
+            let v = f64::from(dy);
             let denom = coeffs[6] * u + coeffs[7] * v + 1.0;
             if denom.abs() < 1e-10 {
                 continue;
@@ -289,7 +288,7 @@ pub fn crop_rotated_text_region(img: &DynamicImage, rbox: &RotatedBox) -> Dynami
     }
 }
 
-/// Assign `paragraph_id` to each OcrItem by clustering lines that belong
+/// Assign `paragraph_id` to each `OcrItem` by clustering lines that belong
 /// to the same text column/paragraph.
 pub fn assign_paragraph_ids(items: &mut [crate::ocr::OcrItem]) {
     if items.is_empty() {
@@ -346,7 +345,7 @@ pub fn assign_paragraph_ids(items: &mut [crate::ocr::OcrItem]) {
             let a_bottom = a.y + a.h;
             let b_top = b.y;
             let gap = (b_top - a_bottom).max(0.0);
-            let avg_h = (a.h + b.h) / 2.0;
+            let avg_h = f32::midpoint(a.h, b.h);
 
             if gap <= avg_h * 1.5 {
                 union(&mut parent, i, j);
@@ -655,8 +654,8 @@ fn extract_rotated_boxes(
 
         // Recompute center / size / angle from scaled corners.
         let sc_center = (
-            (ordered[0].0 + ordered[2].0) / 2.0,
-            (ordered[0].1 + ordered[2].1) / 2.0,
+            f32::midpoint(ordered[0].0, ordered[2].0),
+            f32::midpoint(ordered[0].1, ordered[2].1),
         );
         let sc_w = dist_f32(ordered[0], ordered[1]);
         let sc_h = dist_f32(ordered[0], ordered[3]);
@@ -757,7 +756,7 @@ fn cross_2d(o: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
 }
 
 /// Minimum area rotated rectangle enclosing a convex hull (rotating calipers).
-/// Returns (center, (width, height), angle_radians) where width >= height.
+/// Returns (center, (width, height), `angle_radians`) where width >= height.
 fn min_area_rect(hull: &[(f32, f32)]) -> ((f32, f32), (f32, f32), f32) {
     if hull.is_empty() {
         return ((0.0, 0.0), (0.0, 0.0), 0.0);
@@ -766,8 +765,8 @@ fn min_area_rect(hull: &[(f32, f32)]) -> ((f32, f32), (f32, f32), f32) {
         return (hull[0], (0.0, 0.0), 0.0);
     }
     if hull.len() == 2 {
-        let cx = (hull[0].0 + hull[1].0) / 2.0;
-        let cy = (hull[0].1 + hull[1].1) / 2.0;
+        let cx = f32::midpoint(hull[0].0, hull[1].0);
+        let cy = f32::midpoint(hull[0].1, hull[1].1);
         let d = dist_f32(hull[0], hull[1]);
         let a = (hull[1].1 - hull[0].1).atan2(hull[1].0 - hull[0].0);
         return ((cx, cy), (d, 0.0), a);
@@ -816,8 +815,8 @@ fn min_area_rect(hull: &[(f32, f32)]) -> ((f32, f32), (f32, f32), f32) {
 
         if area < best_area {
             best_area = area;
-            let along_mid = (min_along + max_along) / 2.0;
-            let perp_mid = (min_perp + max_perp) / 2.0;
+            let along_mid = f32::midpoint(min_along, max_along);
+            let perp_mid = f32::midpoint(min_perp, max_perp);
             best_center = (
                 hull[i].0 + along_mid * ex + perp_mid * px,
                 hull[i].1 + along_mid * ey + perp_mid * py,
@@ -874,7 +873,7 @@ fn rect_corners(center: (f32, f32), size: (f32, f32), angle: f32) -> [(f32, f32)
     ]
 }
 
-/// Order 4 corner points as [TL, TR, BR, BL] (RapidOCR convention).
+/// Order 4 corner points as [TL, TR, BR, BL] (`RapidOCR` convention).
 fn order_points(mut corners: [(f32, f32); 4]) -> [(f32, f32); 4] {
     corners.sort_by(|a, b| {
         a.0.partial_cmp(&b.0)
@@ -971,18 +970,18 @@ fn point_in_quad(p: (f32, f32), quad: &[(f32, f32); 4]) -> bool {
 
 /// Compute 3×3 perspective transform mapping src points → dst points.
 /// Returns 8 coefficients [a,b,c,d,e,f,g,h] such that:
-///   dst_x = (a·src_x + b·src_y + c) / (g·src_x + h·src_y + 1)
-///   dst_y = (d·src_x + e·src_y + f) / (g·src_x + h·src_y + 1)
+///   `dst_x` = (`a·src_x` + `b·src_y` + c) / (`g·src_x` + `h·src_y` + 1)
+///   `dst_y` = (`d·src_x` + `e·src_y` + f) / (`g·src_x` + `h·src_y` + 1)
 fn compute_perspective_transform(
     src: &[(f32, f32); 4],
     dst: &[(f32, f32); 4],
 ) -> Option<[f64; 8]> {
     let mut mat = [[0.0f64; 9]; 8];
     for i in 0..4 {
-        let u = src[i].0 as f64;
-        let v = src[i].1 as f64;
-        let x = dst[i].0 as f64;
-        let y = dst[i].1 as f64;
+        let u = f64::from(src[i].0);
+        let v = f64::from(src[i].1);
+        let x = f64::from(dst[i].0);
+        let y = f64::from(dst[i].1);
 
         mat[2 * i] = [u, v, 1.0, 0.0, 0.0, 0.0, -u * x, -v * x, x];
         mat[2 * i + 1] = [0.0, 0.0, 0.0, u, v, 1.0, -u * y, -v * y, y];
@@ -1052,10 +1051,10 @@ fn bilinear_sample(src: &image::RgbImage, sx: f32, sy: f32, w: u32, h: u32) -> [
 
     let mut result = [0u8; 3];
     for c in 0..3 {
-        let v = p00[c] as f32 * (1.0 - fx) * (1.0 - fy)
-            + p10[c] as f32 * fx * (1.0 - fy)
-            + p01[c] as f32 * (1.0 - fx) * fy
-            + p11[c] as f32 * fx * fy;
+        let v = f32::from(p00[c]) * (1.0 - fx) * (1.0 - fy)
+            + f32::from(p10[c]) * fx * (1.0 - fy)
+            + f32::from(p01[c]) * (1.0 - fx) * fy
+            + f32::from(p11[c]) * fx * fy;
         result[c] = v.round().clamp(0.0, 255.0) as u8;
     }
     result
@@ -1072,7 +1071,7 @@ fn dist_f32(a: (f32, f32), b: (f32, f32)) -> f32 {
 /// naturally capture perspective distortion that `minAreaRect` discards.
 /// Returns [TL, TR, BR, BL] via `order_points`.
 ///
-/// NOTE: Currently unused — DBNet's binary mask does not preserve reliable
+/// NOTE: Currently unused — `DBNet`'s binary mask does not preserve reliable
 /// perspective geometry.  Kept for future use with edge-based detection.
 #[allow(dead_code)]
 fn fit_quad_to_hull(hull: &[(f32, f32)]) -> Option<[(f32, f32); 4]> {
@@ -1113,7 +1112,7 @@ fn fit_quad_to_hull(hull: &[(f32, f32)]) -> Option<[(f32, f32); 4]> {
     angles.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     let mut indices: Vec<usize> = angles.iter().take(4).map(|&(_, idx)| idx).collect();
     // Sort by position on the hull to preserve winding order.
-    indices.sort();
+    indices.sort_unstable();
 
     Some(order_points([
         hull[indices[0]],

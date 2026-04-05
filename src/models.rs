@@ -17,7 +17,7 @@ pub enum ModelCategory {
     Face,
 }
 
-/// Progress callback: (file_name, status, percent 0-100, downloaded_bytes, total_bytes)
+/// Progress callback: (`file_name`, status, percent 0-100, `downloaded_bytes`, `total_bytes`)
 pub type ProgressFn = Box<dyn Fn(&str, &str, u8, u64, u64) + Send + Sync>;
 
 const MODEL_FILES: &[ModelFile] = &[
@@ -360,10 +360,13 @@ async fn download_and_extract_zip(url: &str, dest_dir: &str, label: &str, on_pro
             .by_index(i)
             .map_err(|e| format!("ZIP entry error: {e}"))?;
         let name = file.name().to_string();
-        if !name.ends_with(".onnx") {
+        if !std::path::Path::new(&name)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("onnx"))
+        {
             continue;
         }
-        let out_path = format!("{}/{}", dest_dir, name);
+        let out_path = format!("{dest_dir}/{name}");
         if let Some(parent) = Path::new(&out_path).parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("mkdir failed: {e}"))?;
         }

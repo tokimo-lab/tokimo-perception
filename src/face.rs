@@ -1,5 +1,5 @@
-/// Face detection + embedding using InsightFace ONNX models.
-/// SCRFD (det_10g) for detection + ArcFace (w600k_r50) for recognition.
+/// Face detection + embedding using `InsightFace` ONNX models.
+/// SCRFD (`det_10g`) for detection + `ArcFace` (`w600k_r50`) for recognition.
 /// Produces 512-dim face embeddings.
 use std::path::Path;
 use tokio::sync::Mutex;
@@ -24,8 +24,8 @@ pub struct FaceService {
 
 impl FaceService {
     pub fn new(models_dir: &str) -> Result<Self, String> {
-        let det_path = format!("{}/face/det_10g.onnx", models_dir);
-        let rec_path = format!("{}/face/w600k_r50.onnx", models_dir);
+        let det_path = format!("{models_dir}/face/det_10g.onnx");
+        let rec_path = format!("{models_dir}/face/w600k_r50.onnx");
 
         if !Path::new(&det_path).exists() {
             return Err(format!("Face detection model not found: {det_path}"));
@@ -94,7 +94,7 @@ impl FaceService {
             for x in 0..new_w as usize {
                 let pixel = rgb.get_pixel(x as u32, y as u32);
                 for c in 0..3 {
-                    tensor[[0, c, y, x]] = (pixel[c] as f32 - mean[c]) / std_val;
+                    tensor[[0, c, y, x]] = (f32::from(pixel[c]) - mean[c]) / std_val;
                 }
             }
         }
@@ -117,7 +117,7 @@ impl FaceService {
         Ok(faces)
     }
 
-    /// Extract 512-dim ArcFace embedding from a cropped face.
+    /// Extract 512-dim `ArcFace` embedding from a cropped face.
     async fn extract_embedding(
         &self,
         img: &DynamicImage,
@@ -148,7 +148,7 @@ impl FaceService {
             for x in 0..112usize {
                 let pixel = rgb.get_pixel(x as u32, y as u32);
                 for c in 0..3 {
-                    tensor[[0, c, y, x]] = (pixel[c] as f32 - 127.5) / 127.5;
+                    tensor[[0, c, y, x]] = (f32::from(pixel[c]) - 127.5) / 127.5;
                 }
             }
         }

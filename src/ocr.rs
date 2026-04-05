@@ -1,4 +1,4 @@
-/// PaddleOCR CTC recognition pipeline.
+/// `PaddleOCR` CTC recognition pipeline.
 /// Detection and classification are delegated to `OcrDetector`.
 /// Uses ONNX CTC recognition model via ort.
 ///
@@ -95,7 +95,7 @@ impl OcrService {
         let rec_session = load_session(&rec_path)?;
 
         // Build CTC character dictionary: blank + keys + space
-        let mut char_dict = vec!["".to_string()]; // index 0 = CTC blank
+        let mut char_dict = vec![String::new()]; // index 0 = CTC blank
         for line in OCR_KEYS_V5.lines() {
             // Only strip line endings — do NOT use trim() which removes
             // Unicode whitespace like U+3000 (Ideographic Space) present
@@ -264,10 +264,7 @@ impl OcrService {
         img: &DynamicImage,
         bbox: &TextBox,
     ) -> Result<Option<OcrItem>, String> {
-        let tensor = match preprocess_for_rec(img) {
-            Some(t) => t,
-            None => return Ok(None),
-        };
+        let Some(tensor) = preprocess_for_rec(img) else { return Ok(None) };
 
         let input_tensor =
             Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
@@ -327,7 +324,7 @@ fn preprocess_for_rec(img: &DynamicImage) -> Option<Array4<f32>> {
         let gray = img.to_luma8();
         let (gw, gh) = gray.dimensions();
         let avg_lum: f64 =
-            gray.pixels().map(|p| p.0[0] as f64).sum::<f64>() / (gw as f64 * gh as f64);
+            gray.pixels().map(|p| f64::from(p.0[0])).sum::<f64>() / (f64::from(gw) * f64::from(gh));
         if avg_lum < 127.0 {
             let mut g = gray;
             image::imageops::invert(&mut g);
@@ -352,7 +349,7 @@ fn preprocess_for_rec(img: &DynamicImage) -> Option<Array4<f32>> {
         for x in 0..target_w as usize {
             let pixel = rgb.get_pixel(x as u32, y as u32);
             for c in 0..3 {
-                tensor[[0, c, y, x]] = (pixel[c] as f32 / 255.0 - mean[c]) / std[c];
+                tensor[[0, c, y, x]] = (f32::from(pixel[c]) / 255.0 - mean[c]) / std[c];
             }
         }
     }

@@ -806,7 +806,7 @@ pub fn ensure_cache(
 
     // Persist to disk for next startup
     if let Some(ref path) = cache_path {
-        let vec_dim = entries.first().map(|e| e.vec.len()).unwrap_or(512);
+        let vec_dim = entries.first().map_or(512, |e| e.vec.len());
         save_disk_cache(path, hash, &entries, vec_dim);
         tracing::info!("CLIP embedding cache saved to {}", path.display());
     }
@@ -859,7 +859,7 @@ pub fn classify(
     }
 
     let logits: Vec<f32> = cat_scores.iter().map(|(_, _, sim)| sim * LOGIT_SCALE).collect();
-    let max_logit = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let max_logit = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let exp_sum: f32 = logits.iter().map(|l| (l - max_logit).exp()).sum();
 
     // Step 3: Filter by probability threshold and collect results

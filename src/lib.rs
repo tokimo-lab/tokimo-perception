@@ -39,11 +39,11 @@ const MODEL_IDLE_TIMEOUT: Duration = Duration::from_secs(180); // 3 minutes
 
 /// Max intra-op threads per ONNX Runtime session.
 /// Use half the logical CPUs (min 4, max 16) — sweet spot for parallel CPU inference.
-/// The old deadlock risk (with std::sync::Mutex + blocking) is gone now that all
-/// inference uses tokio::sync::Mutex + run_async.
+/// The old deadlock risk (with `std::sync::Mutex` + blocking) is gone now that all
+/// inference uses `tokio::sync::Mutex` + `run_async`.
 fn ort_intra_op_threads() -> usize {
     let cpus = std::thread::available_parallelism()
-        .map(|n| n.get())
+        .map(std::num::NonZero::get)
         .unwrap_or(4);
     (cpus / 2).clamp(4, 16)
 }
@@ -93,12 +93,9 @@ static ENABLE_CUDA: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// Checks: (1) ORT CUDA provider .so exists, (2) required CUDA runtime libs are installed.
 fn detect_cuda_environment() -> bool {
     // 1. Check ORT CUDA provider shared library
-    let ort_path = match std::env::var("ORT_DYLIB_PATH") {
-        Ok(p) => p,
-        Err(_) => {
-            tracing::debug!("CUDA detection: ORT_DYLIB_PATH not set");
-            return false;
-        }
+    let Ok(ort_path) = std::env::var("ORT_DYLIB_PATH") else {
+        tracing::debug!("CUDA detection: ORT_DYLIB_PATH not set");
+        return false;
     };
     let ort_dir = std::path::Path::new(&ort_path)
         .parent()
@@ -306,7 +303,7 @@ impl AiService {
     pub fn status(&self) -> AiStatus {
         AiStatus {
             cuda_enabled: self.config.enable_cuda,
-            ocr_loaded: self.ocr_manager.get().is_some_and(|m| m.has_loaded_backends()),
+            ocr_loaded: self.ocr_manager.get().is_some_and(ocr_manager::OcrManager::has_loaded_backends),
             clip_loaded: self.clip.try_read().is_ok_and(|g| g.is_some()),
             face_loaded: self.face.try_read().is_ok_and(|g| g.is_some()),
             stt_loaded: self.stt.try_read().is_ok_and(|g| g.is_some()),
@@ -339,7 +336,7 @@ impl AiService {
     }
 
     /// Download any missing models with progress callback.
-    /// Callback: (file_name, status, percent, downloaded_bytes, total_bytes)
+    /// Callback: (`file_name`, status, percent, `downloaded_bytes`, `total_bytes`)
     pub async fn ensure_models_with_progress(
         &self,
         on_progress: models::ProgressFn,
@@ -416,7 +413,7 @@ impl AiService {
 
     /// Hybrid OCR: `det_model` provides bounding boxes, `vlm_model` provides
     /// accurate text. Results are merged by the sidecar.
-    /// Returns (merged_items, optional_debug_info).
+    /// Returns (`merged_items`, `optional_debug_info`).
     pub async fn ocr_hybrid(
         &self,
         image_bytes: &[u8],
@@ -440,7 +437,7 @@ impl AiService {
     }
 
     /// List available OCR models and their status.
-    pub async fn ocr_available_models(&self) -> Vec<ocr_manager::OcrModelInfo> {
+    pub fn ocr_available_models(&self) -> Vec<ocr_manager::OcrModelInfo> {
         match self.ocr_manager.get() {
             Some(mgr) => mgr.available_models(),
             None => vec![],
@@ -543,7 +540,7 @@ impl AiService {
 
     // ── STT ──────────────────────────────────────────────────────────────
 
-    /// Transcribe WAV audio bytes to text using SenseVoice (sherpa-onnx).
+    /// Transcribe WAV audio bytes to text using `SenseVoice` (sherpa-onnx).
     pub async fn transcribe_audio(&self, wav_bytes: &[u8]) -> Result<String, String> {
         if !self.config.enable_stt {
             return Err("STT is disabled".into());
@@ -555,7 +552,7 @@ impl AiService {
             .map_err(|e| format!("Transcription task panicked: {e}"))?
     }
 
-    /// Transcribe raw f32 PCM samples using SenseVoice (for streaming refinement).
+    /// Transcribe raw f32 PCM samples using `SenseVoice` (for streaming refinement).
     pub async fn transcribe_pcm(
         &self,
         samples: Vec<f32>,

@@ -1,6 +1,6 @@
 use image::DynamicImage;
 
-/// Model variant for PaddleOCR (Mobile = fast/lightweight, Server = accurate/heavy).
+/// Model variant for `PaddleOCR` (Mobile = fast/lightweight, Server = accurate/heavy).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaddleOcrVariant {
     Mobile,

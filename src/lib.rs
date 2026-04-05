@@ -10,11 +10,42 @@ pub mod config;
 pub mod face;
 pub mod models;
 
+/// GPU acceleration execution provider selected at runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccelProvider {
+    /// NVIDIA CUDA — Linux / Windows (requires CUDA 12 + cuDNN 9 runtime).
+    Cuda,
+    /// AMD ROCm — Linux (requires ROCm runtime + `/dev/kfd`).
+    ROCm,
+    /// Apple CoreML — macOS Intel + Apple Silicon (system framework, always available on macOS ≥ 10.15).
+    CoreML,
+    /// Microsoft DirectML — Windows (system component, always available on Windows 10+).
+    DirectML,
+    /// CPU fallback — always available.
+    Cpu,
+}
+
+impl AccelProvider {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Cuda => "CUDA",
+            Self::ROCm => "ROCm",
+            Self::CoreML => "CoreML",
+            Self::DirectML => "DirectML",
+            Self::Cpu => "CPU",
+        }
+    }
+
+    pub fn is_gpu(self) -> bool {
+        !matches!(self, Self::Cpu)
+    }
+}
+
 /// Snapshot of AI service status for the system-info API.
 #[derive(Debug, Clone)]
 pub struct AiStatus {
-    /// Whether CUDA was requested in config.
-    pub cuda_enabled: bool,
+    /// The active execution provider (CPU = none available).
+    pub accel_provider: AccelProvider,
     pub ocr_loaded: bool,
     pub clip_loaded: bool,
     pub face_loaded: bool,
@@ -49,102 +80,261 @@ fn ort_intra_op_threads() -> usize {
 }
 
 /// Build an ONNX Runtime session from a model file.
-/// When CUDA is enabled, attempts to register the CUDA execution provider.
-/// If CUDA EP registration fails (e.g. driver mismatch), falls back to CPU
-/// with a warning log.
+/// Uses the execution provider selected at init (CUDA / ROCm / CoreML / DirectML / CPU).
+/// If the selected GPU EP fails to register, falls back to CPU with a warning.
 pub fn build_session(path: impl AsRef<std::path::Path>) -> ort::Result<ort::session::Session> {
     use ort::session::Session;
 
     let path = path.as_ref();
     let filename = path.file_name().unwrap_or_default().to_string_lossy();
+    let ep = active_ep();
 
-    if ENABLE_CUDA.load(Ordering::Relaxed) {
-        tracing::info!("[ort] Building session for {filename} with CUDA EP");
-        match Session::builder()?
+    if ep == AccelProvider::Cpu {
+        tracing::info!("[ort] Building session for {filename} (CPU)");
+        return Session::builder()?
             .with_intra_threads(ort_intra_op_threads())?
-            .with_execution_providers([ort::ep::CUDA::default().build().error_on_failure()])
-        {
-            Ok(mut builder) => {
-                let session = builder.commit_from_file(path)?;
-                tracing::info!("[ort] ✓ Session {filename} loaded with CUDA EP");
-                Ok(session)
+            .commit_from_file(path);
+    }
+
+    tracing::info!("[ort] Building session for {filename} with {} EP", ep.name());
+
+    // macOS: CoreML
+    #[cfg(target_os = "macos")]
+    if ep == AccelProvider::CoreML {
+        let r = Session::builder()?
+            .with_intra_threads(ort_intra_op_threads())?
+            .with_execution_providers([ort::ep::CoreML::default().build().error_on_failure()]);
+        match r {
+            Ok(mut b) => {
+                let s = b.commit_from_file(path)?;
+                tracing::info!("[ort] ✓ Session {filename} loaded with CoreML EP");
+                return Ok(s);
             }
             Err(e) => {
-                tracing::warn!(
-                    "[ort] CUDA EP registration failed for {filename}: {e} — falling back to CPU"
-                );
-                Session::builder()?
+                tracing::warn!("[ort] CoreML EP failed for {filename}: {e} — falling back to CPU");
+                return Session::builder()?
                     .with_intra_threads(ort_intra_op_threads())?
-                    .commit_from_file(path)
+                    .commit_from_file(path);
             }
         }
-    } else {
-        tracing::info!("[ort] Building session for {filename} (CPU only)");
-        Session::builder()?
+    }
+
+    // Windows: DirectML
+    #[cfg(target_os = "windows")]
+    if ep == AccelProvider::DirectML {
+        let r = Session::builder()?
             .with_intra_threads(ort_intra_op_threads())?
-            .commit_from_file(path)
-    }
-}
-
-/// Whether CUDA was enabled after auto-detection (set once at init).
-static ENABLE_CUDA: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Detect whether the CUDA environment is ready for ONNX Runtime.
-/// Checks: (1) ORT CUDA provider .so exists, (2) required CUDA runtime libs are installed.
-fn detect_cuda_environment() -> bool {
-    // 1. Check ORT CUDA provider shared library
-    let Ok(ort_path) = std::env::var("ORT_DYLIB_PATH") else {
-        tracing::debug!("CUDA detection: ORT_DYLIB_PATH not set");
-        return false;
-    };
-    let ort_dir = std::path::Path::new(&ort_path)
-        .parent()
-        .unwrap_or(std::path::Path::new("."));
-    if !ort_dir.join("libonnxruntime_providers_cuda.so").exists() {
-        tracing::debug!("CUDA detection: libonnxruntime_providers_cuda.so not found");
-        return false;
-    }
-
-    // 2. Check required CUDA runtime libraries (ORT 1.24.x)
-    let required = [
-        "libcudart.so.12",
-        "libcublas.so.12",
-        "libcublasLt.so.12",
-        "libcufft.so.11",
-        "libcurand.so.10",
-        "libcudnn.so.9",
-    ];
-    let lib_dirs = [
-        "/usr/lib/x86_64-linux-gnu",
-        "/lib/x86_64-linux-gnu",
-        "/usr/local/cuda/lib64",
-        "/usr/local/cuda-12/lib64",
-        "/usr/local/cuda-12/targets/x86_64-linux/lib",
-    ];
-    let ldconfig = std::process::Command::new("ldconfig")
-        .arg("-p")
-        .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-        .unwrap_or_default();
-
-    for lib in required {
-        let found = ldconfig.contains(lib)
-            || lib_dirs
-                .iter()
-                .any(|dir| std::path::Path::new(dir).join(lib).exists());
-        if !found {
-            tracing::debug!("CUDA detection: {lib} not found");
-            return false;
+            .with_execution_providers([ort::ep::DirectML::default().build().error_on_failure()]);
+        match r {
+            Ok(mut b) => {
+                let s = b.commit_from_file(path)?;
+                tracing::info!("[ort] ✓ Session {filename} loaded with DirectML EP");
+                return Ok(s);
+            }
+            Err(e) => {
+                tracing::warn!("[ort] DirectML EP failed for {filename}: {e} — falling back to CPU");
+                return Session::builder()?
+                    .with_intra_threads(ort_intra_op_threads())?
+                    .commit_from_file(path);
+            }
         }
     }
 
-    true
+    // Linux AMD: ROCm
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    if ep == AccelProvider::ROCm {
+        let r = Session::builder()?
+            .with_intra_threads(ort_intra_op_threads())?
+            .with_execution_providers([ort::ep::ROCm::default().build().error_on_failure()]);
+        match r {
+            Ok(mut b) => {
+                let s = b.commit_from_file(path)?;
+                tracing::info!("[ort] ✓ Session {filename} loaded with ROCm EP");
+                return Ok(s);
+            }
+            Err(e) => {
+                tracing::warn!("[ort] ROCm EP failed for {filename}: {e} — falling back to CPU");
+                return Session::builder()?
+                    .with_intra_threads(ort_intra_op_threads())?
+                    .commit_from_file(path);
+            }
+        }
+    }
+
+    // NVIDIA CUDA (Linux / Windows)
+    if ep == AccelProvider::Cuda {
+        let r = Session::builder()?
+            .with_intra_threads(ort_intra_op_threads())?
+            .with_execution_providers([ort::ep::CUDA::default().build().error_on_failure()]);
+        match r {
+            Ok(mut b) => {
+                let s = b.commit_from_file(path)?;
+                tracing::info!("[ort] ✓ Session {filename} loaded with CUDA EP");
+                return Ok(s);
+            }
+            Err(e) => {
+                tracing::warn!("[ort] CUDA EP failed for {filename}: {e} — falling back to CPU");
+            }
+        }
+    }
+
+    // CPU fallback
+    Session::builder()?
+        .with_intra_threads(ort_intra_op_threads())?
+        .commit_from_file(path)
 }
 
-/// Returns whether CUDA is enabled (auto-detected at init).
+/// The GPU execution provider selected at init (CPU = disabled / not available).
+static ACTIVE_EP: std::sync::OnceLock<AccelProvider> = std::sync::OnceLock::new();
+
+/// Returns the active execution provider (set once during `AiService::new`).
+pub fn active_ep() -> AccelProvider {
+    ACTIVE_EP.get().copied().unwrap_or(AccelProvider::Cpu)
+}
+
+/// Backward-compatible helper — true only when CUDA EP is active.
 pub fn is_cuda_enabled() -> bool {
-    ENABLE_CUDA.load(Ordering::Relaxed)
+    active_ep() == AccelProvider::Cuda
+}
+
+// ── Platform-gated detection helpers ─────────────────────────────────────────
+
+/// Check whether a shared library is loadable by the system linker.
+/// Linux: queries `ldconfig` + common hard-coded dirs.
+/// macOS: checks common Homebrew / system install paths.
+/// Windows: not needed (DirectML is a system component, no extra dylib check).
+#[cfg(not(target_os = "windows"))]
+fn lib_available(lib: &str) -> bool {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let lib_dirs = [
+            "/usr/lib/x86_64-linux-gnu",
+            "/usr/lib/aarch64-linux-gnu",
+            "/lib/x86_64-linux-gnu",
+            "/usr/local/lib",
+            "/usr/local/cuda/lib64",
+            "/usr/local/cuda-12/lib64",
+            "/usr/local/cuda-12/targets/x86_64-linux/lib",
+            "/opt/rocm/lib",
+        ];
+        let ldconfig = std::process::Command::new("ldconfig")
+            .arg("-p")
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+        ldconfig.contains(lib) || lib_dirs.iter().any(|d| std::path::Path::new(d).join(lib).exists())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let lib_dirs = [
+            "/usr/local/lib",
+            "/usr/lib",
+            "/opt/homebrew/lib",
+            "/opt/homebrew/opt/onnxruntime/lib",
+        ];
+        lib_dirs.iter().any(|d| std::path::Path::new(d).join(lib).exists())
+    }
+}
+
+/// Check that at least one NVIDIA GPU device is accessible.
+/// Guards against CUDA base images running on CPU-only hosts without `--gpus`.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn gpu_device_present() -> bool {
+    std::path::Path::new("/dev/nvidia0").exists()
+        || std::process::Command::new("nvidia-smi")
+            .arg("--query-gpu=name")
+            .arg("--format=csv,noheader")
+            .output()
+            .map(|o| o.status.success() && !o.stdout.is_empty())
+            .unwrap_or(false)
+}
+
+/// Detect NVIDIA CUDA — Linux / Windows.
+/// Returns Ok(()) if ready, Err with the first missing piece otherwise.
+#[cfg(not(target_os = "macos"))]
+fn detect_cuda() -> Result<(), &'static str> {
+    let checks: &[(&str, &str)] = &[
+        ("libonnxruntime_providers_cuda.so", "ORT CUDA provider not in linker path"),
+        ("libcudart.so.12",  "libcudart.so.12 missing"),
+        ("libcublas.so.12",  "libcublas.so.12 missing"),
+        ("libcublasLt.so.12","libcublasLt.so.12 missing"),
+        ("libcufft.so.11",   "libcufft.so.11 missing"),
+        ("libcurand.so.10",  "libcurand.so.10 missing"),
+        ("libcudnn.so.9",    "libcudnn.so.9 missing"),
+    ];
+    for (lib, reason) in checks {
+        if !lib_available(lib) { return Err(reason); }
+    }
+    #[cfg(not(target_os = "windows"))]
+    if !gpu_device_present() { return Err("no GPU device (/dev/nvidia0 absent, nvidia-smi failed)"); }
+    Ok(())
+}
+
+/// Detect AMD ROCm — Linux only.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn detect_rocm() -> Result<(), &'static str> {
+    if !std::path::Path::new("/dev/kfd").exists() { return Err("/dev/kfd not found"); }
+    let checks: &[(&str, &str)] = &[
+        ("libonnxruntime_providers_rocm.so", "ORT ROCm provider not in linker path"),
+        ("libamdhip64.so.6", "libamdhip64.so.6 missing"),
+        ("libMIOpen.so.1",   "libMIOpen.so.1 missing"),
+        ("librocblas.so.4",  "librocblas.so.4 missing"),
+    ];
+    for (lib, reason) in checks {
+        if !lib_available(lib) { return Err(reason); }
+    }
+    Ok(())
+}
+
+/// Detect Apple CoreML — macOS only.
+#[cfg(target_os = "macos")]
+fn detect_coreml() -> Result<(), &'static str> {
+    if lib_available("libonnxruntime_providers_coreml.dylib") { Ok(()) }
+    else { Err("ORT CoreML provider dylib not in library path") }
+}
+
+/// Detect Microsoft DirectML — Windows only.
+#[cfg(target_os = "windows")]
+fn detect_directml() -> Result<(), &'static str> {
+    let found = std::process::Command::new("where")
+        .arg("onnxruntime_providers_directml.dll")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if found { Ok(()) } else { Err("onnxruntime_providers_directml.dll not in PATH") }
+}
+
+/// Detect the best available EP and return it with a human-readable description for logging.
+fn detect_best_ep() -> (AccelProvider, String) {
+    #[cfg(target_os = "macos")]
+    match detect_coreml() {
+        Ok(()) => return (AccelProvider::CoreML, "CoreML".into()),
+        Err(r) => return (AccelProvider::Cpu, format!("CPU (CoreML unavailable: {r})")),
+    }
+
+    #[cfg(target_os = "windows")]
+    match detect_directml() {
+        Ok(()) => return (AccelProvider::DirectML, "DirectML".into()),
+        Err(r) => return (AccelProvider::Cpu, format!("CPU (DirectML unavailable: {r})")),
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let cuda = detect_cuda();
+        if cuda.is_ok() { return (AccelProvider::Cuda, "CUDA".into()); }
+        let rocm = detect_rocm();
+        if rocm.is_ok() { return (AccelProvider::ROCm, "ROCm".into()); }
+        let reason = format!(
+            "CPU (CUDA: {}; ROCm: {})",
+            cuda.unwrap_err(),
+            rocm.unwrap_err(),
+        );
+        return (AccelProvider::Cpu, reason);
+    }
+
+    #[allow(unreachable_code)]
+    (AccelProvider::Cpu, "CPU".into())
 }
 
 /// Epoch-based timestamp (seconds since an arbitrary point).
@@ -176,23 +366,14 @@ pub struct AiService {
 
 impl AiService {
     pub fn new(config: AiConfig) -> Arc<Self> {
-        // Auto-detect CUDA: user wants it AND environment supports it.
-        let use_cuda = config.enable_cuda && detect_cuda_environment();
-        ENABLE_CUDA.store(use_cuda, Ordering::Relaxed);
+        let (ep, ep_desc) = detect_best_ep();
 
-        // Initialize ONNX Runtime environment (CPU only at global level).
-        // CUDA EP is applied per-session in build_session().
+        // OnceLock — first call wins; subsequent AiService::new calls (tests) are no-ops.
+        let _ = ACTIVE_EP.set(ep);
+
         let applied = ort::init().commit();
         if applied {
-            if use_cuda {
-                tracing::info!("ONNX Runtime initialized (CUDA enabled per-session)");
-            } else if config.enable_cuda {
-                tracing::info!(
-                    "ONNX Runtime initialized (CUDA requested but environment not ready, using CPU)"
-                );
-            } else {
-                tracing::info!("ONNX Runtime initialized (CPU only)");
-            }
+            tracing::info!("ONNX Runtime initialized — EP: {ep_desc}");
         }
 
         Arc::new(Self {
@@ -303,7 +484,7 @@ impl AiService {
     /// Report current AI service status for the system-info API.
     pub fn status(&self) -> AiStatus {
         AiStatus {
-            cuda_enabled: self.config.enable_cuda,
+            accel_provider: active_ep(),
             ocr_loaded: self.ocr_manager.get().is_some_and(ocr_manager::OcrManager::has_loaded_backends),
             clip_loaded: self.clip.try_read().is_ok_and(|g| g.is_some()),
             face_loaded: self.face.try_read().is_ok_and(|g| g.is_some()),

@@ -94,8 +94,8 @@ impl OcrDetector {
         let scale = (max_side / orig_w.max(orig_h)).min(1.0);
         let new_w = ((orig_w * scale) as u32).max(32);
         let new_h = ((orig_h * scale) as u32).max(32);
-        let pad_w = ((new_w + 31) / 32) * 32;
-        let pad_h = ((new_h + 31) / 32) * 32;
+        let pad_w = new_w.div_ceil(32) * 32;
+        let pad_h = new_h.div_ceil(32) * 32;
 
         let resized =
             img.resize_exact(new_w, new_h, image::imageops::FilterType::CatmullRom);
@@ -358,14 +358,14 @@ pub fn assign_paragraph_ids(items: &mut [crate::ocr::OcrItem]) {
         std::collections::HashMap::new();
     let mut next_id = 0u32;
 
-    for i in 0..n {
+    for (i, item) in items.iter_mut().enumerate() {
         let root = find(&mut parent, i);
         let id = root_to_id.entry(root).or_insert_with(|| {
             let id = next_id;
             next_id += 1;
             id
         });
-        items[i].paragraph_id = *id;
+        item.paragraph_id = *id;
     }
 }
 
@@ -936,12 +936,11 @@ fn box_score_fast(
 
     for y in min_y..=max_y {
         for x in min_x..=max_x {
-            if point_in_quad((x as f32, y as f32), corners) {
-                if let Some(&val) = prob_data.get(y * map_w + x) {
+            if point_in_quad((x as f32, y as f32), corners)
+                && let Some(&val) = prob_data.get(y * map_w + x) {
                     total += val;
                     count += 1;
                 }
-            }
         }
     }
 
@@ -993,6 +992,7 @@ fn compute_perspective_transform(
 }
 
 /// Gaussian elimination with partial pivoting for an 8×8 augmented system.
+#[allow(clippy::needless_range_loop)]
 fn solve_8x8(mat: &mut [[f64; 9]; 8]) -> Option<[f64; 8]> {
     for col in 0..8 {
         // Find pivot.

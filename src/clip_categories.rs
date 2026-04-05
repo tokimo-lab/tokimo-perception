@@ -771,8 +771,8 @@ pub fn ensure_cache(
     });
 
     // Try disk cache first
-    if let Some(ref path) = cache_path {
-        if let Some(entries) = try_load_disk_cache(path, hash) {
+    if let Some(ref path) = cache_path
+        && let Some(entries) = try_load_disk_cache(path, hash) {
             tracing::info!(
                 "CLIP category embeddings loaded from disk cache: {} entries ({} categories)",
                 entries.len(),
@@ -781,7 +781,6 @@ pub fn ensure_cache(
             *guard = Some(EmbeddingCache { entries });
             return Ok(());
         }
-    }
 
     // Compute from scratch
     let start = std::time::Instant::now();

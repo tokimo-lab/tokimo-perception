@@ -139,7 +139,7 @@ async fn download_category(
             if !zip_downloaded.contains(zip_url) {
                 tracing::info!("Downloading archive: {}", zip_url);
                 let parent = Path::new(&full_path).parent().ok_or("Invalid path")?;
-                download_and_extract_zip(zip_url, parent.to_str().unwrap_or("."), f.rel_path, &on_progress).await?;
+                download_and_extract_zip(zip_url, parent.to_str().unwrap_or("."), f.rel_path, on_progress).await?;
                 zip_downloaded.insert(zip_url.to_string());
             }
             // The zip may have a subdirectory, move the file if needed
@@ -173,7 +173,7 @@ async fn download_category(
             }
         } else {
             tracing::info!("Downloading: {} → {}", f.url, full_path);
-            download_file(f.url, &full_path, f.rel_path, &on_progress).await?;
+            download_file(f.url, &full_path, f.rel_path, on_progress).await?;
         }
     }
 

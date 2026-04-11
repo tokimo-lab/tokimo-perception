@@ -1,5 +1,6 @@
 /// Download model files if missing.
 use crate::config::AiConfig;
+use rust_client_api::model_downloader::ModelDownloader;
 use std::path::Path;
 
 struct ModelFile {
@@ -18,7 +19,7 @@ pub enum ModelCategory {
 }
 
 /// Progress callback: (`file_name`, status, percent 0-100, `downloaded_bytes`, `total_bytes`)
-pub type ProgressFn = Box<dyn Fn(&str, &str, u8, u64, u64) + Send + Sync>;
+pub type ProgressFn = rust_client_api::model_downloader::ProgressFn;
 
 const MODEL_FILES: &[ModelFile] = &[
     // CLIP models (from MT-Photos release, publicly accessible)
@@ -118,6 +119,7 @@ async fn download_category(
     on_progress: &Option<ProgressFn>,
 ) -> Result<(), String> {
     let dir = &config.models_dir;
+    let downloader = ModelDownloader::new(reqwest::Client::new());
     let mut zip_downloaded: std::collections::HashSet<String> =
         std::collections::HashSet::new();
 
@@ -139,7 +141,7 @@ async fn download_category(
             if !zip_downloaded.contains(zip_url) {
                 tracing::info!("Downloading archive: {}", zip_url);
                 let parent = Path::new(&full_path).parent().ok_or("Invalid path")?;
-                download_and_extract_zip(zip_url, parent.to_str().unwrap_or("."), f.rel_path, on_progress).await?;
+                downloader.download_and_extract_zip(zip_url, parent.to_str().unwrap_or("."), f.rel_path, on_progress).await.map_err(|e| e.to_string())?;
                 zip_downloaded.insert(zip_url.to_string());
             }
             // The zip may have a subdirectory, move the file if needed
@@ -173,7 +175,7 @@ async fn download_category(
             }
         } else {
             tracing::info!("Downloading: {} → {}", f.url, full_path);
-            download_file(f.url, &full_path, f.rel_path, on_progress).await?;
+            downloader.download_file(f.url, &full_path, f.rel_path, on_progress).await.map_err(|e| e.to_string())?;
         }
     }
 
@@ -241,140 +243,9 @@ pub fn face_models_present(config: &AiConfig) -> bool {
 
 /// Download a single model file to the given destination path.
 pub async fn download_model_file(url: &str, dest: &str) -> Result<(), String> {
-    download_file(url, dest, dest, &None).await
-}
-
-async fn download_file(url: &str, dest: &str, label: &str, on_progress: &Option<ProgressFn>) -> Result<(), String> {
-    use futures_util::StreamExt;
-
-    let parent = Path::new(dest).parent().ok_or("Invalid path")?;
-    tokio::fs::create_dir_all(parent)
+    let downloader = ModelDownloader::new(reqwest::Client::new());
+    downloader
+        .download_file(url, dest, dest, &None)
         .await
-        .map_err(|e| format!("mkdir failed: {e}"))?;
-
-    let resp = reqwest::get(url)
-        .await
-        .map_err(|e| format!("HTTP request failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {}: {}", resp.status(), url));
-    }
-
-    let total_size = resp.content_length().unwrap_or(0);
-    let mut stream = resp.bytes_stream();
-    let mut downloaded: u64 = 0;
-    let mut last_pct: u8 = 0;
-    let mut buf = Vec::with_capacity(total_size as usize);
-
-    if let Some(cb) = on_progress.as_ref() {
-        cb(label, "downloading", 0, 0, total_size);
-    }
-
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("Download stream error: {e}"))?;
-        downloaded += chunk.len() as u64;
-        buf.extend_from_slice(&chunk);
-
-        if let Some(cb) = on_progress.as_ref() {
-            let pct = if total_size > 0 {
-                ((downloaded as f64 / total_size as f64) * 100.0).min(100.0) as u8
-            } else {
-                0
-            };
-            if pct != last_pct {
-                last_pct = pct;
-                cb(label, "downloading", pct, downloaded, total_size);
-            }
-        }
-    }
-
-    tokio::fs::write(dest, &buf)
-        .await
-        .map_err(|e| format!("Write failed: {e}"))?;
-
-    let size_mb = buf.len() as f64 / (1024.0 * 1024.0);
-    tracing::info!("  Done: {:.1} MB", size_mb);
-
-    if let Some(cb) = on_progress.as_ref() {
-        cb(label, "ready", 100, downloaded, total_size);
-    }
-
-    Ok(())
-}
-
-async fn download_and_extract_zip(url: &str, dest_dir: &str, label: &str, on_progress: &Option<ProgressFn>) -> Result<(), String> {
-    use futures_util::StreamExt;
-
-    tokio::fs::create_dir_all(dest_dir)
-        .await
-        .map_err(|e| format!("mkdir failed: {e}"))?;
-
-    let resp = reqwest::get(url)
-        .await
-        .map_err(|e| format!("HTTP request failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {}: {}", resp.status(), url));
-    }
-
-    let total_size = resp.content_length().unwrap_or(0);
-    let mut stream = resp.bytes_stream();
-    let mut downloaded: u64 = 0;
-    let mut last_pct: u8 = 0;
-    let mut buf = Vec::with_capacity(total_size as usize);
-
-    if let Some(cb) = on_progress.as_ref() {
-        cb(label, "downloading", 0, 0, total_size);
-    }
-
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("Download stream error: {e}"))?;
-        downloaded += chunk.len() as u64;
-        buf.extend_from_slice(&chunk);
-
-        if let Some(cb) = on_progress.as_ref() {
-            let pct = if total_size > 0 {
-                ((downloaded as f64 / total_size as f64) * 100.0).min(100.0) as u8
-            } else {
-                0
-            };
-            if pct != last_pct {
-                last_pct = pct;
-                cb(label, "downloading", pct, downloaded, total_size);
-            }
-        }
-    }
-
-    let size_mb = buf.len() as f64 / (1024.0 * 1024.0);
-    tracing::info!("  Downloaded: {:.1} MB, extracting...", size_mb);
-
-    if let Some(cb) = on_progress.as_ref() {
-        cb(label, "extracting", 0, downloaded, total_size);
-    }
-
-    let cursor = std::io::Cursor::new(buf);
-    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP open failed: {e}"))?;
-
-    for i in 0..archive.len() {
-        let mut file = archive
-            .by_index(i)
-            .map_err(|e| format!("ZIP entry error: {e}"))?;
-        let name = file.name().to_string();
-        if !std::path::Path::new(&name)
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("onnx"))
-        {
-            continue;
-        }
-        let out_path = format!("{dest_dir}/{name}");
-        if let Some(parent) = Path::new(&out_path).parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("mkdir failed: {e}"))?;
-        }
-        let mut out_file =
-            std::fs::File::create(&out_path).map_err(|e| format!("File create failed: {e}"))?;
-        std::io::copy(&mut file, &mut out_file).map_err(|e| format!("Extract failed: {e}"))?;
-        tracing::info!("  Extracted: {}", name);
-    }
-
-    Ok(())
+        .map_err(|e| e.to_string())
 }

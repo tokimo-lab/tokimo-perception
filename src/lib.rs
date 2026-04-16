@@ -255,34 +255,48 @@ fn gpu_device_present() -> bool {
 #[cfg(not(target_os = "macos"))]
 fn detect_cuda() -> Result<(), &'static str> {
     let checks: &[(&str, &str)] = &[
-        ("libonnxruntime_providers_cuda.so", "ORT CUDA provider not in linker path"),
-        ("libcudart.so.12",  "libcudart.so.12 missing"),
-        ("libcublas.so.12",  "libcublas.so.12 missing"),
-        ("libcublasLt.so.12","libcublasLt.so.12 missing"),
-        ("libcufft.so.11",   "libcufft.so.11 missing"),
-        ("libcurand.so.10",  "libcurand.so.10 missing"),
-        ("libcudnn.so.9",    "libcudnn.so.9 missing"),
+        (
+            "libonnxruntime_providers_cuda.so",
+            "ORT CUDA provider not in linker path",
+        ),
+        ("libcudart.so.12", "libcudart.so.12 missing"),
+        ("libcublas.so.12", "libcublas.so.12 missing"),
+        ("libcublasLt.so.12", "libcublasLt.so.12 missing"),
+        ("libcufft.so.11", "libcufft.so.11 missing"),
+        ("libcurand.so.10", "libcurand.so.10 missing"),
+        ("libcudnn.so.9", "libcudnn.so.9 missing"),
     ];
     for (lib, reason) in checks {
-        if !lib_available(lib) { return Err(reason); }
+        if !lib_available(lib) {
+            return Err(reason);
+        }
     }
     #[cfg(not(target_os = "windows"))]
-    if !gpu_device_present() { return Err("no GPU device (/dev/nvidia0 absent, nvidia-smi failed)"); }
+    if !gpu_device_present() {
+        return Err("no GPU device (/dev/nvidia0 absent, nvidia-smi failed)");
+    }
     Ok(())
 }
 
 /// Detect AMD ROCm — Linux only.
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn detect_rocm() -> Result<(), &'static str> {
-    if !std::path::Path::new("/dev/kfd").exists() { return Err("/dev/kfd not found"); }
+    if !std::path::Path::new("/dev/kfd").exists() {
+        return Err("/dev/kfd not found");
+    }
     let checks: &[(&str, &str)] = &[
-        ("libonnxruntime_providers_rocm.so", "ORT ROCm provider not in linker path"),
+        (
+            "libonnxruntime_providers_rocm.so",
+            "ORT ROCm provider not in linker path",
+        ),
         ("libamdhip64.so.6", "libamdhip64.so.6 missing"),
-        ("libMIOpen.so.1",   "libMIOpen.so.1 missing"),
-        ("librocblas.so.4",  "librocblas.so.4 missing"),
+        ("libMIOpen.so.1", "libMIOpen.so.1 missing"),
+        ("librocblas.so.4", "librocblas.so.4 missing"),
     ];
     for (lib, reason) in checks {
-        if !lib_available(lib) { return Err(reason); }
+        if !lib_available(lib) {
+            return Err(reason);
+        }
     }
     Ok(())
 }
@@ -290,8 +304,11 @@ fn detect_rocm() -> Result<(), &'static str> {
 /// Detect Apple CoreML — macOS only.
 #[cfg(target_os = "macos")]
 fn detect_coreml() -> Result<(), &'static str> {
-    if lib_available("libonnxruntime_providers_coreml.dylib") { Ok(()) }
-    else { Err("ORT CoreML provider dylib not in library path") }
+    if lib_available("libonnxruntime_providers_coreml.dylib") {
+        Ok(())
+    } else {
+        Err("ORT CoreML provider dylib not in library path")
+    }
 }
 
 /// Detect Microsoft DirectML — Windows only.
@@ -302,7 +319,11 @@ fn detect_directml() -> Result<(), &'static str> {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false);
-    if found { Ok(()) } else { Err("onnxruntime_providers_directml.dll not in PATH") }
+    if found {
+        Ok(())
+    } else {
+        Err("onnxruntime_providers_directml.dll not in PATH")
+    }
 }
 
 /// Detect the best available EP and return it with a human-readable description for logging.
@@ -322,14 +343,14 @@ fn detect_best_ep() -> (AccelProvider, String) {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let cuda = detect_cuda();
-        if cuda.is_ok() { return (AccelProvider::Cuda, "CUDA".into()); }
+        if cuda.is_ok() {
+            return (AccelProvider::Cuda, "CUDA".into());
+        }
         let rocm = detect_rocm();
-        if rocm.is_ok() { return (AccelProvider::ROCm, "ROCm".into()); }
-        let reason = format!(
-            "CPU (CUDA: {}; ROCm: {})",
-            cuda.unwrap_err(),
-            rocm.unwrap_err(),
-        );
+        if rocm.is_ok() {
+            return (AccelProvider::ROCm, "ROCm".into());
+        }
+        let reason = format!("CPU (CUDA: {}; ROCm: {})", cuda.unwrap_err(), rocm.unwrap_err(),);
         return (AccelProvider::Cpu, reason);
     }
 
@@ -467,7 +488,9 @@ impl AiService {
             #[cfg(target_os = "linux")]
             {
                 #[allow(unsafe_code)]
-                unsafe { libc::malloc_trim(0) };
+                unsafe {
+                    libc::malloc_trim(0)
+                };
                 tracing::info!("Called malloc_trim to release memory to OS");
             }
         }
@@ -485,7 +508,10 @@ impl AiService {
     pub fn status(&self) -> AiStatus {
         AiStatus {
             accel_provider: active_ep(),
-            ocr_loaded: self.ocr_manager.get().is_some_and(ocr_manager::OcrManager::has_loaded_backends),
+            ocr_loaded: self
+                .ocr_manager
+                .get()
+                .is_some_and(ocr_manager::OcrManager::has_loaded_backends),
             clip_loaded: self.clip.try_read().is_ok_and(|g| g.is_some()),
             face_loaded: self.face.try_read().is_ok_and(|g| g.is_some()),
             stt_loaded: self.stt.try_read().is_ok_and(|g| g.is_some()),
@@ -519,10 +545,7 @@ impl AiService {
 
     /// Download any missing models with progress callback.
     /// Callback: (`file_name`, status, percent, `downloaded_bytes`, `total_bytes`)
-    pub async fn ensure_models_with_progress(
-        &self,
-        on_progress: models::ProgressFn,
-    ) -> Result<(), String> {
+    pub async fn ensure_models_with_progress(&self, on_progress: models::ProgressFn) -> Result<(), String> {
         models::ensure_models_with_progress(&self.config, Some(on_progress)).await
     }
 
@@ -571,11 +594,7 @@ impl AiService {
     ///
     /// `model_name` selects the backend (e.g. `"rapid-ocr-rust"`).
     /// Pass `None` to use the default server model.
-    pub async fn ocr(
-        &self,
-        image_bytes: &[u8],
-        model_name: Option<&str>,
-    ) -> Result<Vec<ocr::OcrItem>, String> {
+    pub async fn ocr(&self, image_bytes: &[u8], model_name: Option<&str>) -> Result<Vec<ocr::OcrItem>, String> {
         if !self.config.enable_ocr {
             return Err("OCR is disabled".into());
         }
@@ -633,8 +652,7 @@ impl AiService {
         if !self.config.enable_clip {
             return Err("CLIP is disabled".into());
         }
-        let img =
-            image::load_from_memory(image_bytes).map_err(|e| format!("Invalid image: {e}"))?;
+        let img = image::load_from_memory(image_bytes).map_err(|e| format!("Invalid image: {e}"))?;
         let svc = self.get_or_init_clip().await?;
         svc.embed_image(&img).await
     }
@@ -649,10 +667,7 @@ impl AiService {
     }
 
     /// Classify an image vector against the built-in taxonomy using CLIP zero-shot.
-    pub async fn clip_classify(
-        &self,
-        image_vec: &[f32],
-    ) -> Result<Vec<clip_categories::TagResult>, String> {
+    pub async fn clip_classify(&self, image_vec: &[f32]) -> Result<Vec<clip_categories::TagResult>, String> {
         if !self.config.enable_clip {
             return Err("CLIP is disabled".into());
         }
@@ -676,7 +691,7 @@ impl AiService {
         let svc = Arc::new(
             tokio::task::spawn_blocking(move || clip::ClipService::new(&dir))
                 .await
-                .map_err(|e| format!("CLIP load panicked: {e}"))??
+                .map_err(|e| format!("CLIP load panicked: {e}"))??,
         );
         *guard = Some(Arc::clone(&svc));
         Ok(svc)
@@ -685,15 +700,11 @@ impl AiService {
     // ── Face ─────────────────────────────────────────────────────────────
 
     /// Detect faces and extract 512-dim embeddings.
-    pub async fn detect_faces(
-        &self,
-        image_bytes: &[u8],
-    ) -> Result<Vec<face::FaceDetection>, String> {
+    pub async fn detect_faces(&self, image_bytes: &[u8]) -> Result<Vec<face::FaceDetection>, String> {
         if !self.config.enable_face {
             return Err("Face recognition is disabled".into());
         }
-        let img =
-            image::load_from_memory(image_bytes).map_err(|e| format!("Invalid image: {e}"))?;
+        let img = image::load_from_memory(image_bytes).map_err(|e| format!("Invalid image: {e}"))?;
         let svc = self.get_or_init_face().await?;
         svc.detect_faces(&img).await
     }
@@ -714,7 +725,7 @@ impl AiService {
         let svc = Arc::new(
             tokio::task::spawn_blocking(move || face::FaceService::new(&dir))
                 .await
-                .map_err(|e| format!("Face load panicked: {e}"))??
+                .map_err(|e| format!("Face load panicked: {e}"))??,
         );
         *guard = Some(Arc::clone(&svc));
         Ok(svc)
@@ -735,11 +746,7 @@ impl AiService {
     }
 
     /// Transcribe raw f32 PCM samples using `SenseVoice` (for streaming refinement).
-    pub async fn transcribe_pcm(
-        &self,
-        samples: Vec<f32>,
-        sample_rate: i32,
-    ) -> Result<String, String> {
+    pub async fn transcribe_pcm(&self, samples: Vec<f32>, sample_rate: i32) -> Result<String, String> {
         if !self.config.enable_stt {
             return Err("STT is disabled".into());
         }
@@ -762,11 +769,9 @@ impl AiService {
             return Ok(svc.clone());
         }
         let dir = self.config.models_dir.clone();
-        let svc = tokio::task::spawn_blocking(move || {
-            stt::SttService::new(&dir, stt::DEFAULT_MODEL)
-        })
-        .await
-        .map_err(|e| format!("STT load panicked: {e}"))??;
+        let svc = tokio::task::spawn_blocking(move || stt::SttService::new(&dir, stt::DEFAULT_MODEL))
+            .await
+            .map_err(|e| format!("STT load panicked: {e}"))??;
         *guard = Some(svc.clone());
         Ok(svc)
     }
@@ -795,8 +800,7 @@ impl AiService {
     }
 
     async fn get_or_init_streaming_stt(&self) -> Result<stt::StreamingSttService, String> {
-        self.streaming_stt_last_use
-            .store(epoch_secs(), Ordering::Relaxed);
+        self.streaming_stt_last_use.store(epoch_secs(), Ordering::Relaxed);
         {
             let guard = self.streaming_stt.read().await;
             if let Some(svc) = guard.as_ref() {
@@ -808,11 +812,9 @@ impl AiService {
             return Ok(svc.clone());
         }
         let dir = self.config.models_dir.clone();
-        let svc = tokio::task::spawn_blocking(move || {
-            stt::StreamingSttService::new(&dir)
-        })
-        .await
-        .map_err(|e| format!("Streaming STT load panicked: {e}"))??;
+        let svc = tokio::task::spawn_blocking(move || stt::StreamingSttService::new(&dir))
+            .await
+            .map_err(|e| format!("Streaming STT load panicked: {e}"))??;
         *guard = Some(svc.clone());
         Ok(svc)
     }
@@ -838,10 +840,7 @@ impl AiService {
         let url = model.download_url();
         let archive_path = format!("{stt_dir}/_download_{}.tar.bz2", model.id());
 
-        tracing::info!(
-            "Downloading STT model: {} → {stt_dir}",
-            model.display_name()
-        );
+        tracing::info!("Downloading STT model: {} → {stt_dir}", model.display_name());
         on_progress("downloading", 0);
 
         // Streaming download with progress
@@ -865,9 +864,7 @@ impl AiService {
         use futures_util::StreamExt;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| format!("Download stream error: {e}"))?;
-            file.write_all(&chunk)
-                .await
-                .map_err(|e| format!("Write error: {e}"))?;
+            file.write_all(&chunk).await.map_err(|e| format!("Write error: {e}"))?;
             downloaded += chunk.len() as u64;
 
             if total_size > 0 {
@@ -878,9 +875,7 @@ impl AiService {
                 }
             }
         }
-        file.flush()
-            .await
-            .map_err(|e| format!("Flush error: {e}"))?;
+        file.flush().await.map_err(|e| format!("Flush error: {e}"))?;
         drop(file);
 
         let size_mb = downloaded as f64 / (1024.0 * 1024.0);
@@ -907,10 +902,7 @@ impl AiService {
         let _ = tokio::fs::remove_file(&archive_path).await;
 
         on_progress("completed", 100);
-        tracing::info!(
-            "STT model {} downloaded and extracted",
-            model.display_name()
-        );
+        tracing::info!("STT model {} downloaded and extracted", model.display_name());
         Ok(())
     }
 }

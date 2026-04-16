@@ -40,12 +40,10 @@ impl ClipService {
         }
 
         tracing::info!("Loading CLIP image model: {img_path}");
-        let img_session = crate::build_session(&img_path)
-            .map_err(|e| format!("Load CLIP img model: {e}"))?;
+        let img_session = crate::build_session(&img_path).map_err(|e| format!("Load CLIP img model: {e}"))?;
 
         tracing::info!("Loading CLIP text model: {txt_path}");
-        let txt_session = crate::build_session(&txt_path)
-            .map_err(|e| format!("Load CLIP txt model: {e}"))?;
+        let txt_session = crate::build_session(&txt_path).map_err(|e| format!("Load CLIP txt model: {e}"))?;
 
         let tokenizer = BertTokenizer::new();
 
@@ -57,11 +55,9 @@ impl ClipService {
         let _ = clip_categories::ensure_cache(
             &|text| {
                 let token_ids = tokenizer.encode(text, CONTEXT_LENGTH);
-                let input_tensor =
-                    Tensor::from_array(([1i64, CONTEXT_LENGTH as i64], token_ids))
-                        .map_err(|e| format!("Create tensor: {e}"))?;
-                let mut session =
-                    txt_session_std.lock().map_err(|e| format!("Lock: {e}"))?;
+                let input_tensor = Tensor::from_array(([1i64, CONTEXT_LENGTH as i64], token_ids))
+                    .map_err(|e| format!("Create tensor: {e}"))?;
+                let mut session = txt_session_std.lock().map_err(|e| format!("Lock: {e}"))?;
                 let outputs = session
                     .run(ort::inputs![input_tensor])
                     .map_err(|e| format!("CLIP txt inference: {e}"))?;
@@ -87,10 +83,8 @@ impl ClipService {
     /// Image → 512-dim CLIP embedding.
     pub async fn embed_image(&self, img: &DynamicImage) -> Result<Vec<f32>, String> {
         let input = preprocess_image(img);
-        let input_tensor =
-            Tensor::from_array(input).map_err(|e| format!("Create tensor: {e}"))?;
-        let options =
-            ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let input_tensor = Tensor::from_array(input).map_err(|e| format!("Create tensor: {e}"))?;
+        let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
 
         let data: Vec<f32> = {
             let mut session = self.img_session.lock().await;
@@ -113,8 +107,7 @@ impl ClipService {
         let token_ids = self.tokenizer.encode(text, CONTEXT_LENGTH);
         let input_tensor = Tensor::from_array(([1i64, CONTEXT_LENGTH as i64], token_ids))
             .map_err(|e| format!("Create tensor: {e}"))?;
-        let options =
-            ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
 
         let data: Vec<f32> = {
             let mut session = self.txt_session.lock().await;

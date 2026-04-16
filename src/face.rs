@@ -35,12 +35,10 @@ impl FaceService {
         }
 
         tracing::info!("Loading face detection model (SCRFD)...");
-        let det_session = crate::build_session(&det_path)
-            .map_err(|e| format!("Load face det model: {e}"))?;
+        let det_session = crate::build_session(&det_path).map_err(|e| format!("Load face det model: {e}"))?;
 
         tracing::info!("Loading face recognition model (ArcFace)...");
-        let rec_session = crate::build_session(&rec_path)
-            .map_err(|e| format!("Load face rec model: {e}"))?;
+        let rec_session = crate::build_session(&rec_path).map_err(|e| format!("Load face rec model: {e}"))?;
 
         tracing::info!("Face service ready.");
         Ok(Self {
@@ -82,8 +80,7 @@ impl FaceService {
         let new_w = (orig_w * scale) as u32;
         let new_h = (orig_h * scale) as u32;
 
-        let resized =
-            img.resize_exact(new_w, new_h, image::imageops::FilterType::CatmullRom);
+        let resized = img.resize_exact(new_w, new_h, image::imageops::FilterType::CatmullRom);
         let rgb = resized.to_rgb8();
 
         // Pad to target_size × target_size
@@ -99,10 +96,8 @@ impl FaceService {
             }
         }
 
-        let input_tensor =
-            Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
-        let options =
-            ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let input_tensor = Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
+        let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
         let faces = {
             let mut session = self.det_session.lock().await;
             let outputs = session
@@ -118,11 +113,7 @@ impl FaceService {
     }
 
     /// Extract 512-dim `ArcFace` embedding from a cropped face.
-    async fn extract_embedding(
-        &self,
-        img: &DynamicImage,
-        face: &RawFace,
-    ) -> Result<Vec<f32>, String> {
+    async fn extract_embedding(&self, img: &DynamicImage, face: &RawFace) -> Result<Vec<f32>, String> {
         // Crop face region with some margin
         let margin = 10;
         let x = (face.x - margin).max(0) as u32;
@@ -138,8 +129,7 @@ impl FaceService {
         let cropped = img.crop_imm(x, y, w, h);
 
         // Resize to 112×112 (ArcFace standard input)
-        let resized =
-            cropped.resize_exact(112, 112, image::imageops::FilterType::CatmullRom);
+        let resized = cropped.resize_exact(112, 112, image::imageops::FilterType::CatmullRom);
         let rgb = resized.to_rgb8();
 
         // Normalize: (pixel - 127.5) / 127.5
@@ -153,10 +143,8 @@ impl FaceService {
             }
         }
 
-        let input_tensor =
-            Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
-        let options =
-            ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let input_tensor = Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
+        let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
         let raw: Vec<f32> = {
             let mut session = self.rec_session.lock().await;
             let outputs = session
@@ -313,9 +301,5 @@ fn iou(a: &RawFace, b: &RawFace) -> f32 {
     let area_b = (b.w * b.h) as f32;
     let union = area_a + area_b - inter;
 
-    if union > 0.0 {
-        inter / union
-    } else {
-        0.0
-    }
+    if union > 0.0 { inter / union } else { 0.0 }
 }

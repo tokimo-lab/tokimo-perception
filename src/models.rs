@@ -83,10 +83,7 @@ pub async fn ensure_models(config: &AiConfig) -> Result<(), String> {
     ensure_models_with_progress(config, None).await
 }
 
-pub async fn ensure_models_with_progress(
-    config: &AiConfig,
-    on_progress: Option<ProgressFn>,
-) -> Result<(), String> {
+pub async fn ensure_models_with_progress(config: &AiConfig, on_progress: Option<ProgressFn>) -> Result<(), String> {
     let enabled: Vec<ModelCategory> = [
         (config.enable_clip, ModelCategory::Clip),
         (config.enable_ocr, ModelCategory::OcrServer),
@@ -120,8 +117,7 @@ async fn download_category(
 ) -> Result<(), String> {
     let dir = &config.models_dir;
     let downloader = ModelDownloader::new(reqwest::Client::new());
-    let mut zip_downloaded: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut zip_downloaded: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for f in MODEL_FILES {
         if f.category != category {
@@ -141,7 +137,10 @@ async fn download_category(
             if !zip_downloaded.contains(zip_url) {
                 tracing::info!("Downloading archive: {}", zip_url);
                 let parent = Path::new(&full_path).parent().ok_or("Invalid path")?;
-                downloader.download_and_extract_zip(zip_url, parent.to_str().unwrap_or("."), f.rel_path, on_progress).await.map_err(|e| e.to_string())?;
+                downloader
+                    .download_and_extract_zip(zip_url, parent.to_str().unwrap_or("."), f.rel_path, on_progress)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 zip_downloaded.insert(zip_url.to_string());
             }
             // The zip may have a subdirectory, move the file if needed
@@ -175,7 +174,10 @@ async fn download_category(
             }
         } else {
             tracing::info!("Downloading: {} → {}", f.url, full_path);
-            downloader.download_file(f.url, &full_path, f.rel_path, on_progress).await.map_err(|e| e.to_string())?;
+            downloader
+                .download_file(f.url, &full_path, f.rel_path, on_progress)
+                .await
+                .map_err(|e| e.to_string())?;
         }
     }
 
@@ -237,8 +239,7 @@ pub fn ocr_models_present(config: &AiConfig) -> bool {
 /// Check whether face detection/recognition model files exist on disk.
 pub fn face_models_present(config: &AiConfig) -> bool {
     let dir = &config.models_dir;
-    Path::new(&format!("{dir}/face/det_10g.onnx")).exists()
-        && Path::new(&format!("{dir}/face/w600k_r50.onnx")).exists()
+    Path::new(&format!("{dir}/face/det_10g.onnx")).exists() && Path::new(&format!("{dir}/face/w600k_r50.onnx")).exists()
 }
 
 /// Download a single model file to the given destination path.

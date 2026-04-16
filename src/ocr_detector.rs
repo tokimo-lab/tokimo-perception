@@ -64,11 +64,7 @@ impl OcrDetector {
         Self::with_max_side(models_dir, variant, DEFAULT_DET_MAX_SIDE)
     }
 
-    pub fn with_max_side(
-        models_dir: &str,
-        variant: PaddleOcrVariant,
-        det_max_side: u32,
-    ) -> Result<Self, String> {
+    pub fn with_max_side(models_dir: &str, variant: PaddleOcrVariant, det_max_side: u32) -> Result<Self, String> {
         let det_name = match variant {
             PaddleOcrVariant::Mobile => "PP-OCRv5_mobile_det.onnx",
             PaddleOcrVariant::Server => "PP-OCRv5_server_det.onnx",
@@ -97,8 +93,7 @@ impl OcrDetector {
         let pad_w = new_w.div_ceil(32) * 32;
         let pad_h = new_h.div_ceil(32) * 32;
 
-        let resized =
-            img.resize_exact(new_w, new_h, image::imageops::FilterType::CatmullRom);
+        let resized = img.resize_exact(new_w, new_h, image::imageops::FilterType::CatmullRom);
         let rgb = resized.to_rgb8();
 
         let mean = [0.485f32, 0.456, 0.406];
@@ -113,10 +108,8 @@ impl OcrDetector {
             }
         }
 
-        let input_tensor =
-            Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
-        let options =
-            ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let input_tensor = Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
+        let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
         let prob_data: Vec<f32> = {
             let mut session = self.det_session.lock().await;
             let outputs = session
@@ -189,10 +182,8 @@ impl OcrDetector {
             }
         }
 
-        let input_tensor =
-            Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
-        let options =
-            ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let input_tensor = Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
+        let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
         let is_flipped: bool = {
             let mut session = self.cls_session.lock().await;
             let outputs = session
@@ -220,12 +211,8 @@ pub fn crop_text_region(img: &DynamicImage, bbox: &TextBox) -> DynamicImage {
     let pad = 3u32;
     let x = (bbox.x as u32).saturating_sub(pad).min(img.width().saturating_sub(1));
     let y = (bbox.y as u32).saturating_sub(pad).min(img.height().saturating_sub(1));
-    let w = ((bbox.w as u32) + 2 * pad)
-        .min(img.width() - x)
-        .max(1);
-    let h = ((bbox.h as u32) + 2 * pad)
-        .min(img.height() - y)
-        .max(1);
+    let w = ((bbox.w as u32) + 2 * pad).min(img.width() - x).max(1);
+    let h = ((bbox.h as u32) + 2 * pad).min(img.height() - y).max(1);
     img.crop_imm(x, y, w, h)
 }
 
@@ -353,8 +340,7 @@ pub fn assign_paragraph_ids(items: &mut [crate::ocr::OcrItem]) {
         }
     }
 
-    let mut root_to_id: std::collections::HashMap<usize, u32> =
-        std::collections::HashMap::new();
+    let mut root_to_id: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
     let mut next_id = 0u32;
 
     for (i, item) in items.iter_mut().enumerate() {
@@ -389,11 +375,7 @@ fn extract_boxes_from_prob_map(
         for x in 0..map_w {
             let idx = y * map_w + x;
             let val = prob_data.get(idx).copied().unwrap_or(0.0);
-            binary.put_pixel(
-                x as u32,
-                y as u32,
-                Luma([if val > threshold { 255 } else { 0 }]),
-            );
+            binary.put_pixel(x as u32, y as u32, Luma([if val > threshold { 255 } else { 0 }]));
         }
     }
 
@@ -522,9 +504,7 @@ fn find_connected_components(img: &GrayImage) -> Vec<Component> {
                     if nx >= 0 && nx < w as i32 && ny >= 0 && ny < h as i32 {
                         let nx = nx as usize;
                         let ny = ny as usize;
-                        if !visited[ny * w + nx]
-                            && img.get_pixel(nx as u32, ny as u32)[0] > 0
-                        {
+                        if !visited[ny * w + nx] && img.get_pixel(nx as u32, ny as u32)[0] > 0 {
                             visited[ny * w + nx] = true;
                             queue.push_back((nx, ny));
                         }
@@ -561,11 +541,7 @@ fn extract_rotated_boxes(
         for x in 0..map_w {
             let idx = y * map_w + x;
             let val = prob_data.get(idx).copied().unwrap_or(0.0);
-            binary.put_pixel(
-                x as u32,
-                y as u32,
-                Luma([if val > threshold { 255 } else { 0 }]),
-            );
+            binary.put_pixel(x as u32, y as u32, Luma([if val > threshold { 255 } else { 0 }]));
         }
     }
 
@@ -659,8 +635,7 @@ fn extract_rotated_boxes(
         );
         let sc_w = dist_f32(ordered[0], ordered[1]);
         let sc_h = dist_f32(ordered[0], ordered[3]);
-        let sc_angle =
-            (ordered[1].1 - ordered[0].1).atan2(ordered[1].0 - ordered[0].0);
+        let sc_angle = (ordered[1].1 - ordered[0].1).atan2(ordered[1].0 - ordered[0].0);
 
         // Skip degenerate boxes: NaN/Inf in any coordinate, or too large.
         if ordered.iter().any(|c| !c.0.is_finite() || !c.1.is_finite()) {
@@ -670,10 +645,10 @@ fn extract_rotated_boxes(
             continue;
         }
         // Skip boxes whose AABB spans more than 80% of the original image.
-        let aabb_w = ordered.iter().map(|c| c.0).fold(f32::MIN, f32::max)
-            - ordered.iter().map(|c| c.0).fold(f32::MAX, f32::min);
-        let aabb_h = ordered.iter().map(|c| c.1).fold(f32::MIN, f32::max)
-            - ordered.iter().map(|c| c.1).fold(f32::MAX, f32::min);
+        let aabb_w =
+            ordered.iter().map(|c| c.0).fold(f32::MIN, f32::max) - ordered.iter().map(|c| c.0).fold(f32::MAX, f32::min);
+        let aabb_h =
+            ordered.iter().map(|c| c.1).fold(f32::MIN, f32::max) - ordered.iter().map(|c| c.1).fold(f32::MAX, f32::min);
         if aabb_w > orig_w * 0.8 || aabb_h > orig_h * 0.8 {
             continue;
         }
@@ -699,13 +674,11 @@ fn get_hull_input_pixels(pixels: &[(usize, usize)]) -> Vec<(f32, f32)> {
     pixels
         .iter()
         .filter(|&&(x, y)| {
-            [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
-                .iter()
-                .any(|&(dx, dy)| {
-                    let nx = x as i32 + dx;
-                    let ny = y as i32 + dy;
-                    nx < 0 || ny < 0 || !set.contains(&(nx as usize, ny as usize))
-                })
+            [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
+                let nx = x as i32 + dx;
+                let ny = y as i32 + dy;
+                nx < 0 || ny < 0 || !set.contains(&(nx as usize, ny as usize))
+            })
         })
         .map(|&(x, y)| (x as f32, y as f32))
         .collect()
@@ -738,9 +711,7 @@ fn convex_hull(points: &[(f32, f32)]) -> Vec<(f32, f32)> {
     // Upper hull.
     let lower_len = hull.len();
     for &p in pts.iter().rev().skip(1) {
-        while hull.len() > lower_len
-            && cross_2d(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0
-        {
+        while hull.len() > lower_len && cross_2d(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0 {
             hull.pop();
         }
         hull.push(p);
@@ -899,27 +870,14 @@ fn order_points(mut corners: [(f32, f32); 4]) -> [(f32, f32); 4] {
 }
 
 /// Average probability inside a rotated quad (fast axis-aligned scan).
-fn box_score_fast(
-    prob_data: &[f32],
-    map_w: usize,
-    map_h: usize,
-    corners: &[(f32, f32); 4],
-) -> f32 {
-    let min_x = corners
-        .iter()
-        .map(|c| c.0)
-        .fold(f32::MAX, f32::min)
-        .max(0.0) as usize;
+fn box_score_fast(prob_data: &[f32], map_w: usize, map_h: usize, corners: &[(f32, f32); 4]) -> f32 {
+    let min_x = corners.iter().map(|c| c.0).fold(f32::MAX, f32::min).max(0.0) as usize;
     let max_x = corners
         .iter()
         .map(|c| c.0)
         .fold(f32::MIN, f32::max)
         .min(map_w.saturating_sub(1) as f32) as usize;
-    let min_y = corners
-        .iter()
-        .map(|c| c.1)
-        .fold(f32::MAX, f32::min)
-        .max(0.0) as usize;
+    let min_y = corners.iter().map(|c| c.1).fold(f32::MAX, f32::min).max(0.0) as usize;
     let max_y = corners
         .iter()
         .map(|c| c.1)
@@ -936,18 +894,15 @@ fn box_score_fast(
     for y in min_y..=max_y {
         for x in min_x..=max_x {
             if point_in_quad((x as f32, y as f32), corners)
-                && let Some(&val) = prob_data.get(y * map_w + x) {
-                    total += val;
-                    count += 1;
-                }
+                && let Some(&val) = prob_data.get(y * map_w + x)
+            {
+                total += val;
+                count += 1;
+            }
         }
     }
 
-    if count > 0 {
-        total / count as f32
-    } else {
-        0.0
-    }
+    if count > 0 { total / count as f32 } else { 0.0 }
 }
 
 /// Test whether a point lies inside a convex quadrilateral (winding test).
@@ -956,8 +911,7 @@ fn point_in_quad(p: (f32, f32), quad: &[(f32, f32); 4]) -> bool {
     let mut neg = 0u8;
     for i in 0..4 {
         let j = (i + 1) % 4;
-        let cross = (quad[j].0 - quad[i].0) * (p.1 - quad[i].1)
-            - (quad[j].1 - quad[i].1) * (p.0 - quad[i].0);
+        let cross = (quad[j].0 - quad[i].0) * (p.1 - quad[i].1) - (quad[j].1 - quad[i].1) * (p.0 - quad[i].0);
         if cross > 0.0 {
             pos += 1;
         }
@@ -972,10 +926,7 @@ fn point_in_quad(p: (f32, f32), quad: &[(f32, f32); 4]) -> bool {
 /// Returns 8 coefficients [a,b,c,d,e,f,g,h] such that:
 ///   `dst_x` = (`a·src_x` + `b·src_y` + c) / (`g·src_x` + `h·src_y` + 1)
 ///   `dst_y` = (`d·src_x` + `e·src_y` + f) / (`g·src_x` + `h·src_y` + 1)
-fn compute_perspective_transform(
-    src: &[(f32, f32); 4],
-    dst: &[(f32, f32); 4],
-) -> Option<[f64; 8]> {
+fn compute_perspective_transform(src: &[(f32, f32); 4], dst: &[(f32, f32); 4]) -> Option<[f64; 8]> {
     let mut mat = [[0.0f64; 9]; 8];
     for i in 0..4 {
         let u = f64::from(src[i].0);
@@ -1099,7 +1050,11 @@ fn fit_quad_to_hull(hull: &[(f32, f32)]) -> Option<[(f32, f32); 4]> {
         let len_in = (d_in.0 * d_in.0 + d_in.1 * d_in.1).sqrt();
         let len_out = (d_out.0 * d_out.0 + d_out.1 * d_out.1).sqrt();
         let denom = len_in * len_out;
-        let cos_val = if denom > 1e-8 { (dot / denom).clamp(-1.0, 1.0) } else { 1.0 };
+        let cos_val = if denom > 1e-8 {
+            (dot / denom).clamp(-1.0, 1.0)
+        } else {
+            1.0
+        };
         // θ = acos(cos_val) is the angle between consecutive edge direction
         // vectors d_in and d_out.  For a convex polygon vertex with interior
         // angle α, θ = π − α, i.e. θ IS the exterior (turning) angle.
@@ -1169,12 +1124,7 @@ fn unclip_quad(quad: &[(f32, f32); 4], distance: f32) -> [(f32, f32); 4] {
 
 /// Intersection of two lines (each defined by two points).
 #[allow(dead_code)]
-fn line_intersect(
-    a1: (f32, f32),
-    a2: (f32, f32),
-    b1: (f32, f32),
-    b2: (f32, f32),
-) -> Option<(f32, f32)> {
+fn line_intersect(a1: (f32, f32), a2: (f32, f32), b1: (f32, f32), b2: (f32, f32)) -> Option<(f32, f32)> {
     let d1 = (a2.0 - a1.0, a2.1 - a1.1);
     let d2 = (b2.0 - b1.0, b2.1 - b1.1);
     let cross = d1.0 * d2.1 - d1.1 * d2.0;

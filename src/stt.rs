@@ -11,8 +11,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use sherpa_onnx::{
-    OfflineRecognizer, OfflineRecognizerConfig, OfflineSenseVoiceModelConfig,
-    OnlineRecognizer, OnlineRecognizerConfig, OnlineTransducerModelConfig,
+    OfflineRecognizer, OfflineRecognizerConfig, OfflineSenseVoiceModelConfig, OnlineRecognizer, OnlineRecognizerConfig,
+    OnlineTransducerModelConfig,
 };
 
 // ── Model catalogue ──────────────────────────────────────────────────────────
@@ -37,9 +37,7 @@ impl SttModel {
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::SenseVoiceInt8 => "SenseVoice (int8, ~230 MB)",
-            Self::StreamingZipformerBilingualZhEn => {
-                "Streaming Zipformer bilingual zh-en (~70 MB)"
-            }
+            Self::StreamingZipformerBilingualZhEn => "Streaming Zipformer bilingual zh-en (~70 MB)",
         }
     }
 
@@ -47,16 +45,18 @@ impl SttModel {
     pub fn dir_name(&self) -> &'static str {
         match self {
             Self::SenseVoiceInt8 => "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
-            Self::StreamingZipformerBilingualZhEn => {
-                "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"
-            }
+            Self::StreamingZipformerBilingualZhEn => "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",
         }
     }
 
     pub fn download_url(&self) -> &'static str {
         match self {
-            Self::SenseVoiceInt8 => "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2",
-            Self::StreamingZipformerBilingualZhEn => "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2",
+            Self::SenseVoiceInt8 => {
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2"
+            }
+            Self::StreamingZipformerBilingualZhEn => {
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2"
+            }
         }
     }
 
@@ -73,10 +73,7 @@ impl SttModel {
 
 pub const DEFAULT_MODEL: SttModel = SttModel::SenseVoiceInt8;
 pub const STREAMING_MODEL: SttModel = SttModel::StreamingZipformerBilingualZhEn;
-pub const ALL_MODELS: &[SttModel] = &[
-    SttModel::SenseVoiceInt8,
-    SttModel::StreamingZipformerBilingualZhEn,
-];
+pub const ALL_MODELS: &[SttModel] = &[SttModel::SenseVoiceInt8, SttModel::StreamingZipformerBilingualZhEn];
 
 // ── Offline SttService (SenseVoice) ──────────────────────────────────────────
 
@@ -150,9 +147,7 @@ impl SttService {
         );
 
         if samples.len() < (sample_rate as usize / 2) {
-            return Err(format!(
-                "Audio too short ({duration_secs:.1}s, need at least 0.5s)"
-            ));
+            return Err(format!("Audio too short ({duration_secs:.1}s, need at least 0.5s)"));
         }
 
         let stream = self.recognizer.create_stream();
@@ -172,9 +167,7 @@ impl SttService {
     pub fn transcribe_pcm(&self, samples: &[f32], sample_rate: i32) -> Result<String, String> {
         let duration_secs = samples.len() as f64 / f64::from(sample_rate);
         if samples.len() < (sample_rate as usize / 2) {
-            return Err(format!(
-                "Audio too short ({duration_secs:.1}s, need at least 0.5s)"
-            ));
+            return Err(format!("Audio too short ({duration_secs:.1}s, need at least 0.5s)"));
         }
 
         let stream = self.recognizer.create_stream();
@@ -252,16 +245,14 @@ impl StreamingSttService {
             .ok_or_else(|| format!("Streaming encoder not found in {model_dir}"))?;
         let decoder = find_onnx_file(&model_dir, "decoder")
             .ok_or_else(|| format!("Streaming decoder not found in {model_dir}"))?;
-        let joiner = find_onnx_file(&model_dir, "joiner")
-            .ok_or_else(|| format!("Streaming joiner not found in {model_dir}"))?;
+        let joiner =
+            find_onnx_file(&model_dir, "joiner").ok_or_else(|| format!("Streaming joiner not found in {model_dir}"))?;
 
         if !Path::new(&tokens_path).exists() {
             return Err(format!("Streaming tokens not found: {tokens_path}"));
         }
 
-        tracing::info!(
-            "Loading streaming STT: encoder={encoder}, decoder={decoder}, joiner={joiner}"
-        );
+        tracing::info!("Loading streaming STT: encoder={encoder}, decoder={decoder}, joiner={joiner}");
 
         let mut config = OnlineRecognizerConfig::default();
         config.model_config.transducer = OnlineTransducerModelConfig {
@@ -278,8 +269,8 @@ impl StreamingSttService {
         config.rule2_min_trailing_silence = 0.8; // shorter silence after speech
         config.rule3_min_utterance_length = 20.0;
 
-        let recognizer = OnlineRecognizer::create(&config)
-            .ok_or_else(|| "Failed to create streaming recognizer".to_string())?;
+        let recognizer =
+            OnlineRecognizer::create(&config).ok_or_else(|| "Failed to create streaming recognizer".to_string())?;
 
         tracing::info!("Streaming STT model loaded");
         Ok(Self {
@@ -336,18 +327,14 @@ impl StreamingSttService {
 /// Decode WAV bytes to f32 mono samples, returning (samples, `sample_rate`).
 fn decode_wav_to_f32(wav_bytes: &[u8]) -> Result<(Vec<f32>, i32), String> {
     let cursor = std::io::Cursor::new(wav_bytes);
-    let reader =
-        hound::WavReader::new(cursor).map_err(|e| format!("Failed to read WAV: {e}"))?;
+    let reader = hound::WavReader::new(cursor).map_err(|e| format!("Failed to read WAV: {e}"))?;
 
     let spec = reader.spec();
     let sample_rate = spec.sample_rate as i32;
     let channels = spec.channels as usize;
 
     let raw_samples: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => reader
-            .into_samples::<f32>()
-            .filter_map(Result::ok)
-            .collect(),
+        hound::SampleFormat::Float => reader.into_samples::<f32>().filter_map(Result::ok).collect(),
         hound::SampleFormat::Int => {
             let bits = spec.bits_per_sample;
             let max_val = (1u32 << (bits - 1)) as f32;

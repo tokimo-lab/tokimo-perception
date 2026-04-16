@@ -9,7 +9,7 @@
 use tokio::sync::Mutex;
 
 use image::DynamicImage;
-use ndarray::{s, Array4};
+use ndarray::{Array4, s};
 use ort::{session::Session, value::Tensor};
 
 use crate::ocr_backend::{OcrBackend, PaddleOcrVariant};
@@ -60,11 +60,7 @@ impl OcrService {
         Self::new_with_options(models_dir, variant, DetectionMode::Components, None)
     }
 
-    pub fn new_with_mode(
-        models_dir: &str,
-        variant: PaddleOcrVariant,
-        mode: DetectionMode,
-    ) -> Result<Self, String> {
+    pub fn new_with_mode(models_dir: &str, variant: PaddleOcrVariant, mode: DetectionMode) -> Result<Self, String> {
         Self::new_with_options(models_dir, variant, mode, None)
     }
 
@@ -75,14 +71,8 @@ impl OcrService {
         det_max_side: Option<u32>,
     ) -> Result<Self, String> {
         let (rec_name, variant_name) = match variant {
-            PaddleOcrVariant::Mobile => (
-                "PP-OCRv5_mobile_rec.onnx",
-                "pp-ocrv5-mobile",
-            ),
-            PaddleOcrVariant::Server => (
-                "PP-OCRv5_server_rec.onnx",
-                "pp-ocrv5-server",
-            ),
+            PaddleOcrVariant::Mobile => ("PP-OCRv5_mobile_rec.onnx", "pp-ocrv5-mobile"),
+            PaddleOcrVariant::Server => ("PP-OCRv5_server_rec.onnx", "pp-ocrv5-server"),
         };
 
         let detector = match det_max_side {
@@ -143,8 +133,7 @@ impl OcrService {
                     if cropped.width() < 2 || cropped.height() < 2 {
                         continue;
                     }
-                    let (rotated, was_flipped) =
-                        self.detector.classify_and_rotate(&cropped).await?;
+                    let (rotated, was_flipped) = self.detector.classify_and_rotate(&cropped).await?;
                     if let Some(tensor) = preprocess_for_rec(&rotated) {
                         prepared.push(PreparedCrop {
                             tensor,
@@ -162,8 +151,7 @@ impl OcrService {
                     if cropped.width() < 2 || cropped.height() < 2 {
                         continue;
                     }
-                    let (rotated, was_flipped) =
-                        self.detector.classify_and_rotate(&cropped).await?;
+                    let (rotated, was_flipped) = self.detector.classify_and_rotate(&cropped).await?;
                     let mut angle_deg = rbox.angle.to_degrees();
                     if was_flipped {
                         angle_deg += 180.0;
@@ -194,11 +182,7 @@ impl OcrService {
         // All crops are padded to max_w with zeros (same as PaddleOCR's official batch impl).
         // ORT's per-call overhead outweighs the padding cost; one call is faster than N buckets.
         let n = prepared.len();
-        let max_w = prepared
-            .iter()
-            .map(|p| p.tensor.shape()[3])
-            .max()
-            .unwrap_or(1);
+        let max_w = prepared.iter().map(|p| p.tensor.shape()[3]).max().unwrap_or(1);
 
         let mut batch = Array4::<f32>::zeros((n, 3, 48, max_w));
         for (i, p) in prepared.iter().enumerate() {
@@ -208,8 +192,7 @@ impl OcrService {
                 .assign(&p.tensor.slice(s![0, .., .., ..]));
         }
 
-        let batch_tensor =
-            Tensor::from_array(batch).map_err(|e| format!("Batch tensor: {e}"))?;
+        let batch_tensor = Tensor::from_array(batch).map_err(|e| format!("Batch tensor: {e}"))?;
         let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
         let rec_array: ndarray::ArrayD<f32> = {
             let mut session = self.rec_session.lock().await;
@@ -231,13 +214,7 @@ impl OcrService {
             if shape.len() < 2 {
                 continue;
             }
-            if let Some(mut item) = ctc_decode(
-                item_view.view(),
-                shape[0],
-                shape[1],
-                &self.char_dict,
-                &prep.bbox,
-            ) {
+            if let Some(mut item) = ctc_decode(item_view.view(), shape[0], shape[1], &self.char_dict, &prep.bbox) {
                 item.angle = prep.angle_deg;
                 item.corners = prep.corners;
                 results.push(item);
@@ -250,26 +227,18 @@ impl OcrService {
 
     /// Kept for possible future use (single-crop path).
     #[allow(dead_code)]
-    async fn recognize_text(
-        &self,
-        img: &DynamicImage,
-        bbox: &TextBox,
-    ) -> Result<Option<OcrItem>, String> {
+    async fn recognize_text(&self, img: &DynamicImage, bbox: &TextBox) -> Result<Option<OcrItem>, String> {
         self.recognize_text_ctc(img, bbox).await
     }
 
     #[allow(dead_code)]
-    async fn recognize_text_ctc(
-        &self,
-        img: &DynamicImage,
-        bbox: &TextBox,
-    ) -> Result<Option<OcrItem>, String> {
-        let Some(tensor) = preprocess_for_rec(img) else { return Ok(None) };
+    async fn recognize_text_ctc(&self, img: &DynamicImage, bbox: &TextBox) -> Result<Option<OcrItem>, String> {
+        let Some(tensor) = preprocess_for_rec(img) else {
+            return Ok(None);
+        };
 
-        let input_tensor =
-            Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
-        let options =
-            ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let input_tensor = Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
+        let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
         let rec_array: ndarray::ArrayD<f32> = {
             let mut session = self.rec_session.lock().await;
             let outputs = session
@@ -323,8 +292,7 @@ fn preprocess_for_rec(img: &DynamicImage) -> Option<Array4<f32>> {
     let img = {
         let gray = img.to_luma8();
         let (gw, gh) = gray.dimensions();
-        let avg_lum: f64 =
-            gray.pixels().map(|p| f64::from(p.0[0])).sum::<f64>() / (f64::from(gw) * f64::from(gh));
+        let avg_lum: f64 = gray.pixels().map(|p| f64::from(p.0[0])).sum::<f64>() / (f64::from(gw) * f64::from(gh));
         if avg_lum < 127.0 {
             let mut g = gray;
             image::imageops::invert(&mut g);
@@ -335,8 +303,7 @@ fn preprocess_for_rec(img: &DynamicImage) -> Option<Array4<f32>> {
     };
 
     let target_h = 48u32;
-    let target_w = ((img.width() as f32 / img.height() as f32) * target_h as f32)
-        .max(1.0) as u32;
+    let target_w = ((img.width() as f32 / img.height() as f32) * target_h as f32).max(1.0) as u32;
     let target_w = target_w.min(2048);
 
     let resized = img.resize_exact(target_w, target_h, image::imageops::FilterType::CatmullRom);
@@ -403,9 +370,7 @@ fn ctc_decode(
     let step_w = bbox.w / seq_len as f32;
     let char_positions = char_timesteps
         .iter()
-        .map(|&(start_t, end_t)| {
-            (start_t as f32 * step_w, (end_t - start_t + 1) as f32 * step_w)
-        })
+        .map(|&(start_t, end_t)| (start_t as f32 * step_w, (end_t - start_t + 1) as f32 * step_w))
         .collect();
 
     Some(OcrItem {

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -95,19 +95,11 @@ impl OcrManager {
         Self::with_options(models_dir, sidecar_url, None)
     }
 
-    pub fn with_max_side(
-        models_dir: String,
-        sidecar_url: Option<String>,
-        det_max_side: Option<u32>,
-    ) -> Self {
+    pub fn with_max_side(models_dir: String, sidecar_url: Option<String>, det_max_side: Option<u32>) -> Self {
         Self::with_options(models_dir, sidecar_url, det_max_side)
     }
 
-    pub fn with_options(
-        models_dir: String,
-        sidecar_url: Option<String>,
-        det_max_side: Option<u32>,
-    ) -> Self {
+    pub fn with_options(models_dir: String, sidecar_url: Option<String>, det_max_side: Option<u32>) -> Self {
         let mut backends: HashMap<&'static str, BackendSlot> = HashMap::new();
         backends.insert(MODEL_PP_OCRV5_MOBILE, BackendSlot::new());
         backends.insert(MODEL_RAPID_OCR_RUST, BackendSlot::new());
@@ -128,11 +120,10 @@ impl OcrManager {
 
         // VLM models: call sidecar HTTP endpoint directly (async)
         if model_name == MODEL_GOT_OCR_2 {
-            let sidecar_url = self.sidecar_url.as_deref().ok_or_else(|| {
-                format!(
-                    "VLM OCR backend '{model_name}' requires OCR_SIDECAR_URL to be configured"
-                )
-            })?;
+            let sidecar_url = self
+                .sidecar_url
+                .as_deref()
+                .ok_or_else(|| format!("VLM OCR backend '{model_name}' requires OCR_SIDECAR_URL to be configured"))?;
             return vlm_ocr_via_sidecar(sidecar_url, model_name, image_bytes).await;
         }
 
@@ -153,9 +144,10 @@ impl OcrManager {
         vlm_model: &str,
         image_bytes: &[u8],
     ) -> Result<(Vec<OcrItem>, Option<serde_json::Value>), String> {
-        let sidecar_url = self.sidecar_url.as_deref().ok_or_else(|| {
-            "Hybrid OCR requires OCR_SIDECAR_URL to be configured".to_string()
-        })?;
+        let sidecar_url = self
+            .sidecar_url
+            .as_deref()
+            .ok_or_else(|| "Hybrid OCR requires OCR_SIDECAR_URL to be configured".to_string())?;
 
         // 1. Run detection model for bounding boxes
         let det_items = self.ocr(det_model, image_bytes).await?;
@@ -214,9 +206,7 @@ impl OcrManager {
     }
 
     fn is_loaded(&self, model: &str) -> bool {
-        self.backends
-            .get(model)
-            .is_some_and(BackendSlot::is_loaded)
+        self.backends.get(model).is_some_and(BackendSlot::is_loaded)
     }
 
     /// Whether any OCR backend is currently loaded in memory.
@@ -224,16 +214,12 @@ impl OcrManager {
         self.backends.values().any(BackendSlot::is_loaded)
     }
 
-    async fn get_or_init_backend(
-        &self,
-        model_name: &str,
-    ) -> Result<Arc<dyn OcrBackend>, String> {
+    async fn get_or_init_backend(&self, model_name: &str) -> Result<Arc<dyn OcrBackend>, String> {
         let slot = self
             .backends
             .get(model_name)
             .ok_or_else(|| format!("Unknown OCR model: {model_name}"))?;
-        slot.get_or_init(model_name, &self.models_dir, self.det_max_side)
-            .await
+        slot.get_or_init(model_name, &self.models_dir, self.det_max_side).await
     }
 }
 
@@ -293,11 +279,7 @@ struct SidecarOcrResponse {
 }
 
 /// Call the Python OCR sidecar via HTTP to run VLM-based OCR.
-async fn vlm_ocr_via_sidecar(
-    sidecar_url: &str,
-    model_name: &str,
-    image_bytes: &[u8],
-) -> Result<Vec<OcrItem>, String> {
+async fn vlm_ocr_via_sidecar(sidecar_url: &str, model_name: &str, image_bytes: &[u8]) -> Result<Vec<OcrItem>, String> {
     let b64 = base64::engine::general_purpose::STANDARD.encode(image_bytes);
     let body = serde_json::json!({
         "model": model_name,

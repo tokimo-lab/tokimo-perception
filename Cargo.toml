@@ -29,10 +29,6 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # Logging
 tracing = "0.1"
 
-# Memory management (malloc_trim on Linux)
-[target.'cfg(target_os = "linux")'.dependencies]
-libc = "0.2"
-
 # Speech-to-text (sherpa-onnx official Rust bindings, prebuilt libs auto-downloaded)
 sherpa-onnx = "1.12.34"
 
@@ -46,6 +42,10 @@ futures-util = "0.3"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "json"] }
 rust-client-api = { path = "../rust-client-api" }
 zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Memory management (malloc_trim on Linux)
+libc = "0.2"
 
 [lints]
 workspace = true

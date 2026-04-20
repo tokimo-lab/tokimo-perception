@@ -1,7 +1,7 @@
-//! Convert between rust-models' native types and ai-worker-protocol wire types.
+//! Convert between tokimo-perception' native types and ai-worker-protocol wire types.
 
-use rust_models::worker::protocol::types as wire;
-use rust_models as rm;
+use tokimo_perception::worker::protocol::types as wire;
+use tokimo_perception as rm;
 
 pub fn accel_to_wire(p: rm::AccelProvider) -> wire::AccelProvider {
     match p {

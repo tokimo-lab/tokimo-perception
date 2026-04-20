@@ -5,10 +5,10 @@
 
 use std::sync::Arc;
 
-use rust_models::worker::protocol::error::{RpcError, RpcResult};
-use rust_models::worker::protocol::routes;
-use rust_models::worker::protocol::types as wire;
-use rust_models::AiService;
+use tokimo_perception::worker::protocol::error::{RpcError, RpcResult};
+use tokimo_perception::worker::protocol::routes;
+use tokimo_perception::worker::protocol::types as wire;
+use tokimo_perception::AiService;
 use serde::Serialize;
 use tokio::sync::mpsc;
 
@@ -49,7 +49,7 @@ async fn unary_inner(ai: &Arc<AiService>, route: &str, req_bytes: &[u8]) -> RpcR
     match route {
         routes::PING => encode::<RpcResult<wire::Pong>>(&Ok(wire::Pong {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            accel_provider: convert::accel_to_wire(rust_models::active_ep()),
+            accel_provider: convert::accel_to_wire(tokimo_perception::active_ep()),
         })),
         routes::INFO => {
             let cfg = ai.config();
@@ -189,8 +189,8 @@ async fn server_stream_inner(
         routes::ENSURE_CATEGORY => {
             let req: wire::EnsureCategoryRequest = decode(req_bytes)?;
             let tx_clone = tx.clone();
-            // ProgressFn is a boxed async closure — see rust-models::models::ProgressFn
-            let progress: rust_models::models::ProgressFn = Box::new(move |file, status, pct, dl, total| {
+            // ProgressFn is a boxed async closure — see tokimo-perception::models::ProgressFn
+            let progress: tokimo_perception::models::ProgressFn = Box::new(move |file, status, pct, dl, total| {
                 let frame = wire::ProgressFrame::Progress {
                     file_name: file.to_string(),
                     status: status.to_string(),

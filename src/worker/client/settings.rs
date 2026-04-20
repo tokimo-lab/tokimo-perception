@@ -24,7 +24,7 @@ pub struct AiWorkerSettings {
     /// Idle seconds before graceful worker shutdown. `None` = 900 (15 min).
     /// `Some(0)` = disabled (same effect as `keepalive_always`).
     pub idle_timeout_secs: Option<u32>,
-    /// Path to the `tokimo-ai-worker` binary (when `mode = Auto`).
+    /// Path to the `tokimo-perception-worker` binary (when `mode = Auto`).
     pub worker_binary: Option<String>,
     /// Directory containing AI models.
     pub models_dir: Option<String>,

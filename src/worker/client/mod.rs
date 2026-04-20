@@ -1,7 +1,7 @@
-//! tokimo-ai-worker client library.
+//! tokimo-perception-worker client library.
 //!
 //! Provides [`AiWorkerClient`] — a drop-in replacement for
-//! `rust_models::AiService` that speaks the ai-worker RPC protocol over a
+//! `tokimo_perception::AiService` that speaks the ai-worker RPC protocol over a
 //! pluggable transport, plus a [`Supervisor`] that manages the local
 //! worker process lifecycle (spawn, idle-exit, auto-respawn).
 //!

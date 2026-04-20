@@ -7,8 +7,8 @@
 
 use std::sync::Arc;
 
-use rust_models::worker::protocol::routes;
-use rust_models::worker::protocol::types as wire;
+use tokimo_perception::worker::protocol::routes;
+use tokimo_perception::worker::protocol::types as wire;
 use axum::body::{Body, Bytes};
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Path as AxPath, State};
@@ -16,7 +16,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
-use rust_models::AiService;
+use tokimo_perception::AiService;
 use tokio::sync::mpsc;
 use tokio_util::io::ReaderStream;
 
@@ -46,7 +46,7 @@ async fn handle_unary_or_stream(
     let _ = st.sig.send(WorkerSignal::Activity).await;
 
     if full_route == routes::ENSURE_CATEGORY {
-        let (tx, rx) = mpsc::channel::<rust_models::worker::protocol::RpcResult<wire::ProgressFrame>>(32);
+        let (tx, rx) = mpsc::channel::<tokimo_perception::worker::protocol::RpcResult<wire::ProgressFrame>>(32);
         dispatch::dispatch_server_stream(Arc::clone(&st.ai), &full_route, &body, tx);
         // Convert mpsc<frame> into a length-prefixed byte stream.
         let stream = async_stream::stream! {

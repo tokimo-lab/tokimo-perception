@@ -1,12 +1,12 @@
 [package]
-name = "rust-models"
+name = "tokimo-perception"
 version = "0.1.0"
 edition = "2024"
 description = "OCR + CLIP + Face recognition + STT via ONNX Runtime / sherpa-onnx (library)"
 
 
 [lib]
-name = "rust_models"
+name = "tokimo_perception"
 path = "src/lib.rs"
 
 [dependencies]
@@ -53,7 +53,7 @@ zip = { version = "8", default-features = false, features = ["deflate"] }
 # Worker protocol transports need these for HTTP helper types
 # (reqwest already enables rustls above)
 
-# --- Worker binary (tokimo-ai-worker) deps ---
+# --- Worker binary (tokimo-perception-worker) deps ---
 axum = { version = "0.8", features = ["macros", "ws"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tower-http = { version = "0.6", features = ["trace"] }

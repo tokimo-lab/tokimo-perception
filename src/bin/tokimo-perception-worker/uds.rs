@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use rust_models::worker::protocol::error::RpcError;
-use rust_models::worker::protocol::transport::read_header;
-use rust_models::worker::protocol::{frame, types as wire};
-use rust_models::AiService;
+use tokimo_perception::worker::protocol::error::RpcError;
+use tokimo_perception::worker::protocol::transport::read_header;
+use tokimo_perception::worker::protocol::{frame, types as wire};
+use tokimo_perception::AiService;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
@@ -47,13 +47,13 @@ async fn handle_conn(stream: UnixStream, ai: Arc<AiService>, sig: mpsc::Sender<W
             // Record activity — any RPC counts as a signal to keep the worker alive.
             let _ = sig.send(WorkerSignal::Activity).await;
             // If this was a shutdown call, trigger process exit AFTER ack.
-            if route == rust_models::worker::protocol::routes::SHUTDOWN {
+            if route == tokimo_perception::worker::protocol::routes::SHUTDOWN {
                 let _ = sig.send(WorkerSignal::Shutdown).await;
             }
         }
         "SSTREAM" => {
             let req_bytes: Vec<u8> = read_frame_raw(&mut r).await?;
-            let (tx, mut rx) = mpsc::channel::<rust_models::worker::protocol::RpcResult<wire::ProgressFrame>>(32);
+            let (tx, mut rx) = mpsc::channel::<tokimo_perception::worker::protocol::RpcResult<wire::ProgressFrame>>(32);
             dispatch::dispatch_server_stream(Arc::clone(&ai), &route, &req_bytes, tx);
             while let Some(item) = rx.recv().await {
                 frame::write_frame(&mut w, &item).await?;
@@ -61,7 +61,7 @@ async fn handle_conn(stream: UnixStream, ai: Arc<AiService>, sig: mpsc::Sender<W
             let _ = sig.send(WorkerSignal::Activity).await;
         }
         "BIDI" => {
-            if route == rust_models::worker::protocol::routes::STT_STREAM {
+            if route == tokimo_perception::worker::protocol::routes::STT_STREAM {
                 stt_stream::handle(Arc::clone(&ai), r, w, sig.clone()).await?;
             } else {
                 return Err(RpcError::NotFound(format!("bidi route: {route}")));

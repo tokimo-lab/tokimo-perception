@@ -1,4 +1,4 @@
-//! `tokimo-ai-worker` — sidecar process hosting rust-models out of the main
+//! `tokimo-perception-worker` — sidecar process hosting tokimo-perception out of the main
 //! server's address space, so AI model memory can be reclaimed physically by
 //! exiting the worker on idle.
 
@@ -16,13 +16,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use rust_models::{AiService, config::AiConfig};
+use tokimo_perception::{AiService, config::AiConfig};
 use supervisor::WorkerSignal;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
 #[derive(Parser, Debug)]
-#[command(name = "tokimo-ai-worker", version)]
+#[command(name = "tokimo-perception-worker", version)]
 struct Args {
     /// UDS path to listen on. If omitted, UDS listener is disabled.
     #[arg(long)]

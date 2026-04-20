@@ -6,10 +6,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use rust_models::worker::protocol::error::{RpcError, RpcResult};
-use rust_models::worker::protocol::frame::{read_frame, write_frame};
-use rust_models::worker::protocol::types as wire;
-use rust_models::AiService;
+use tokimo_perception::worker::protocol::error::{RpcError, RpcResult};
+use tokimo_perception::worker::protocol::frame::{read_frame, write_frame};
+use tokimo_perception::worker::protocol::types as wire;
+use tokimo_perception::AiService;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::mpsc;
 use tokio::time::timeout;

@@ -1,6 +1,6 @@
-//! Wire types — mirror rust-models' public types with serde + pure-data shape.
+//! Wire types — mirror tokimo-perception' public types with serde + pure-data shape.
 //!
-//! Conversion back to rust-models types happens inside the worker binary.
+//! Conversion back to tokimo-perception types happens inside the worker binary.
 
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +18,7 @@ pub enum AccelProvider {
 
 impl AccelProvider {
     /// Short human-readable name (matches the strings previously returned by
-    /// `rust_models::config::AccelProvider::name()`).
+    /// `tokimo_perception::config::AccelProvider::name()`).
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {
@@ -42,7 +42,7 @@ pub struct AiStatus {
 
 /// Static + readiness info snapshot. Returned from `/v1/info`; cached by the
 /// client and used to back the sync `is_*_enabled` / `*_ready` / `config()`
-/// APIs that mirror `rust_models::AiService`.
+/// APIs that mirror `tokimo_perception::AiService`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerInfo {
     pub accel_provider: AccelProvider,

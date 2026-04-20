@@ -1,4 +1,4 @@
-//! `AiWorkerClient` — drop-in replacement for `rust_models::AiService`.
+//! `AiWorkerClient` — drop-in replacement for `tokimo_perception::AiService`.
 //!
 //! Wraps a [`Transport`](crate::worker::protocol::transport::Transport) implementation
 //! (UDS or HTTP) and caches a [`WorkerInfo`] snapshot so that the many sync
@@ -7,7 +7,7 @@
 //!
 //! Conversion between `ai_worker_protocol` wire types and `rust-server`'s
 //! internal types happens at the caller boundary — this crate intentionally
-//! does **not** depend on `rust-models`.
+//! does **not** depend on `tokimo-perception`.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,7 +23,7 @@ use crate::worker::protocol::{RpcError, RpcResult};
 use super::supervisor::Supervisor;
 
 /// Result type returned from client methods. String error mirrors the
-/// `Result<_, String>` contract of the previous `rust_models::AiService` so
+/// `Result<_, String>` contract of the previous `tokimo_perception::AiService` so
 /// caller sites need minimal rewrites.
 pub type ClientResult<T> = Result<T, String>;
 

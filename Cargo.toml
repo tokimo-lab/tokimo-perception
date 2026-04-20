@@ -11,7 +11,7 @@ path = "src/lib.rs"
 
 [dependencies]
 # Async
-tokio = { version = "1", features = ["fs", "sync", "net", "io-util", "macros", "rt", "time"] }
+tokio = { version = "1", features = ["fs", "sync", "net", "io-util", "macros", "rt", "rt-multi-thread", "time", "signal", "process"] }
 async-trait = "0.1"
 
 # Serialization
@@ -52,6 +52,15 @@ zip = { version = "8", default-features = false, features = ["deflate"] }
 
 # Worker protocol transports need these for HTTP helper types
 # (reqwest already enables rustls above)
+
+# --- Worker binary (tokimo-ai-worker) deps ---
+axum = { version = "0.8", features = ["macros", "ws"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tower-http = { version = "0.6", features = ["trace"] }
+async-stream = "0.3"
+anyhow = "1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Memory management (malloc_trim on Linux)

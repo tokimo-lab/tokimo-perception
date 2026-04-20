@@ -216,16 +216,17 @@ async fn server_stream_inner(
         routes::DOWNLOAD_STT => {
             let req: wire::DownloadSttRequest = decode(req_bytes)?;
             let tx_clone = tx.clone();
-            let progress: rust_models::models::ProgressFn = Box::new(move |file, status, pct, dl, total| {
+            let model_id_clone = req.model_id.clone();
+            let progress = move |status: &str, pct: u8| {
                 let frame = wire::ProgressFrame::Progress {
-                    file_name: file.to_string(),
+                    file_name: model_id_clone.clone(),
                     status: status.to_string(),
                     percent: u32::from(pct),
-                    downloaded_bytes: dl,
-                    total_bytes: total,
+                    downloaded_bytes: 0,
+                    total_bytes: 0,
                 };
                 let _ = tx_clone.try_send(Ok(frame));
-            });
+            };
             ai.download_stt_model(&req.model_id, progress).await.map_err(map_err)?;
             let _ = tx.send(Ok(wire::ProgressFrame::Done)).await;
             Ok(())

@@ -278,7 +278,7 @@ impl AiWorkerClient {
 
     pub async fn ensure_category_with_progress(
         &self,
-        category: wire::ModelCategory,
+        category: Option<wire::ModelCategory>,
     ) -> ClientResult<mpsc::Receiver<RpcResult<wire::ProgressFrame>>> {
         self.ensure_up().await.map_err(rpc_to_string)?;
         self.mark_activity();

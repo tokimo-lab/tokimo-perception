@@ -188,7 +188,6 @@ async fn server_stream_inner(
     match route {
         routes::ENSURE_CATEGORY => {
             let req: wire::EnsureCategoryRequest = decode(req_bytes)?;
-            let cat = convert::category_from_wire(req.category);
             let tx_clone = tx.clone();
             // ProgressFn is a boxed async closure — see rust-models::models::ProgressFn
             let progress: rust_models::models::ProgressFn = Box::new(move |file, status, pct, dl, total| {
@@ -202,7 +201,32 @@ async fn server_stream_inner(
                 // Non-blocking: drop progress updates if channel is full/closed.
                 let _ = tx_clone.try_send(Ok(frame));
             });
-            ai.ensure_category_with_progress(cat, progress).await.map_err(map_err)?;
+            match req.category {
+                Some(c) => {
+                    let cat = convert::category_from_wire(c);
+                    ai.ensure_category_with_progress(cat, progress).await.map_err(map_err)?;
+                }
+                None => {
+                    ai.ensure_models_with_progress(progress).await.map_err(map_err)?;
+                }
+            }
+            let _ = tx.send(Ok(wire::ProgressFrame::Done)).await;
+            Ok(())
+        }
+        routes::DOWNLOAD_STT => {
+            let req: wire::DownloadSttRequest = decode(req_bytes)?;
+            let tx_clone = tx.clone();
+            let progress: rust_models::models::ProgressFn = Box::new(move |file, status, pct, dl, total| {
+                let frame = wire::ProgressFrame::Progress {
+                    file_name: file.to_string(),
+                    status: status.to_string(),
+                    percent: u32::from(pct),
+                    downloaded_bytes: dl,
+                    total_bytes: total,
+                };
+                let _ = tx_clone.try_send(Ok(frame));
+            });
+            ai.download_stt_model(&req.model_id, progress).await.map_err(map_err)?;
             let _ = tx.send(Ok(wire::ProgressFrame::Done)).await;
             Ok(())
         }

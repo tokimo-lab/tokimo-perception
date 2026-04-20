@@ -20,4 +20,4 @@ pub use super::protocol::{RpcError, RpcResult};
 
 pub use client::{AiWorkerClient, StreamingSttSession};
 pub use settings::{AiWorkerMode, AiWorkerSettings};
-pub use supervisor::Supervisor;
+pub use supervisor::{Supervisor, SupervisorConfig};

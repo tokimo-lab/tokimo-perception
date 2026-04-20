@@ -16,6 +16,21 @@ pub enum AccelProvider {
     Cpu,
 }
 
+impl AccelProvider {
+    /// Short human-readable name (matches the strings previously returned by
+    /// `rust_models::config::AccelProvider::name()`).
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Cuda => "CUDA",
+            Self::Rocm => "ROCm",
+            Self::CoreMl => "CoreML",
+            Self::DirectMl => "DirectML",
+            Self::Cpu => "CPU",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiStatus {
     pub accel_provider: AccelProvider,
@@ -205,7 +220,9 @@ pub enum ModelCategory {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnsureCategoryRequest {
-    pub category: ModelCategory,
+    /// `None` = ensure ALL categories (equivalent to the old
+    /// `ensure_models_with_progress` entry point).
+    pub category: Option<ModelCategory>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

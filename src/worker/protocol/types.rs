@@ -1,0 +1,270 @@
+//! Wire types — mirror rust-models' public types with serde + pure-data shape.
+//!
+//! Conversion back to rust-models types happens inside the worker binary.
+
+use serde::{Deserialize, Serialize};
+
+// ---------- acceleration / status ----------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccelProvider {
+    Cuda,
+    Rocm,
+    CoreMl,
+    DirectMl,
+    Cpu,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiStatus {
+    pub accel_provider: AccelProvider,
+    pub ocr_loaded: bool,
+    pub clip_loaded: bool,
+    pub face_loaded: bool,
+    pub stt_loaded: bool,
+}
+
+/// Static + readiness info snapshot. Returned from `/v1/info`; cached by the
+/// client and used to back the sync `is_*_enabled` / `*_ready` / `config()`
+/// APIs that mirror `rust_models::AiService`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkerInfo {
+    pub accel_provider: AccelProvider,
+    pub models_dir: String,
+    pub ocr_sidecar_url: Option<String>,
+    pub ocr_det_max_side: Option<u32>,
+    pub ocr_enabled: bool,
+    pub clip_enabled: bool,
+    pub face_enabled: bool,
+    pub stt_enabled: bool,
+    pub models_ready: bool,
+    pub ocr_models_ready: bool,
+    pub ocr_server_models_ready: bool,
+    pub ocr_mobile_models_ready: bool,
+    pub clip_models_ready: bool,
+    pub face_models_ready: bool,
+    pub stt_model_ready: bool,
+    pub streaming_stt_model_ready: bool,
+    pub ocr_loaded: bool,
+    pub clip_loaded: bool,
+    pub face_loaded: bool,
+    pub stt_loaded: bool,
+}
+
+// ---------- OCR ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OcrItem {
+    pub text: String,
+    pub score: f32,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub angle: f32,
+    pub corners: Option<[(f32, f32); 4]>,
+    pub paragraph_id: u32,
+    pub char_positions: Option<Vec<(f32, f32)>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OcrModelInfo {
+    pub id: String,
+    pub display_name: String,
+    pub loaded: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OcrRequest {
+    /// Raw image bytes (any format supported by `image` crate).
+    #[serde(with = "serde_bytes")]
+    pub image: Vec<u8>,
+    /// Model id override (None = use configured default).
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OcrHybridRequest {
+    #[serde(with = "serde_bytes")]
+    pub image: Vec<u8>,
+    pub det_model: Option<String>,
+    pub vlm_model: Option<String>,
+}
+
+// serde_bytes crate provides #[serde(with = "serde_bytes")] for Vec<u8>.
+
+// ---------- CLIP ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClipImageRequest {
+    #[serde(with = "serde_bytes")]
+    pub image: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClipTextRequest {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClipClassifyRequest {
+    pub vector: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagResult {
+    pub category: String,
+    pub icon: String,
+    pub subcategory: String,
+    pub score: f32,
+}
+
+// ---------- Face ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaceRequest {
+    #[serde(with = "serde_bytes")]
+    pub image: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaceDetection {
+    pub embedding: Vec<f32>,
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    pub confidence: f32,
+}
+
+// ---------- STT ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SttTranscribeRequest {
+    #[serde(with = "serde_bytes")]
+    pub wav: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SttTranscribeResponse {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SttTranscribePcmRequest {
+    pub samples: Vec<f32>,
+    pub sample_rate: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SttModelStatus {
+    pub id: String,
+    pub name: String,
+    pub ready: bool,
+}
+
+/// Client → worker frames on the streaming STT channel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SttClientFrame {
+    /// One chunk of 16 kHz mono PCM.
+    Audio { pcm: Vec<i16> },
+    /// Reset decoder state without closing the stream.
+    Reset,
+    /// Close the stream (half-close from client side).
+    Close,
+}
+
+/// Worker → client frames on the streaming STT channel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SttServerFrame {
+    /// Partial hypothesis (interim).
+    Partial { text: String },
+    /// Final hypothesis (endpoint triggered).
+    Final { text: String },
+    /// Endpoint detected — client should start a new utterance.
+    Endpoint,
+    /// Fatal error on the stream — client should reconnect.
+    Error { message: String },
+    /// Worker is about to shut down; client must reconnect on next request.
+    ShuttingDown,
+}
+
+// ---------- Model downloads (streaming progress) ----------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelCategory {
+    OcrServer,
+    OcrMobile,
+    Clip,
+    Face,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnsureCategoryRequest {
+    pub category: ModelCategory,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadSttRequest {
+    pub model_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ProgressFrame {
+    Progress {
+        file_name: String,
+        status: String,
+        percent: u32,
+        downloaded_bytes: u64,
+        total_bytes: u64,
+    },
+    Done,
+    Error {
+        message: String,
+    },
+}
+
+// ---------- simple response wrappers ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Pong {
+    pub version: String,
+    pub accel_provider: AccelProvider,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShutdownResponse {
+    pub ok: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VecResponse {
+    pub data: Vec<f32>,
+}
+
+// ---------- pure helpers (no AI runtime needed) ----------
+
+const NO_BLOCK_MODELS: &[&str] = &["got-ocr-2"];
+
+/// Whether a given OCR model returns bounding-box block info.
+#[must_use]
+pub fn ocr_model_supports_blocks(model_name: &str) -> bool {
+    !NO_BLOCK_MODELS.contains(&model_name)
+}
+
+/// Convert Int16 little-endian PCM bytes to normalized f32 samples.
+#[must_use]
+pub fn int16_bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(2)
+        .map(|chunk| {
+            let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
+            f32::from(sample) / 32768.0
+        })
+        .collect()
+}

@@ -57,6 +57,7 @@ pub mod ocr_detector;
 pub mod ocr_manager;
 pub mod stt;
 mod tokenizer;
+pub mod worker;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

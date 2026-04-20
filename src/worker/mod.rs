@@ -10,4 +10,5 @@
 //!
 //! The binary target lives at `src/bin/tokimo-ai-worker/`.
 
+pub mod client;
 pub mod protocol;

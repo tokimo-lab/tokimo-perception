@@ -6,6 +6,7 @@
 //!
 //! The child process inherits our stderr and is killed when the worker exits.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -13,7 +14,7 @@ use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::{sleep, timeout};
 
 /// A running Python sidecar instance.
@@ -30,6 +31,11 @@ pub struct SidecarManager {
     python_dir: PathBuf,
     models_dir: String,
     state: Mutex<Option<Running>>,
+    /// Slugs (Python sidecar side, e.g. "got-ocr-2") of models confirmed ready
+    /// during this worker session. Populated by `run_sidecar_download` on
+    /// success so `build_catalog` can reflect the ready state without having
+    /// to async-probe the Python sidecar on every request.
+    ready_models: RwLock<HashSet<String>>,
 }
 
 impl SidecarManager {
@@ -38,6 +44,7 @@ impl SidecarManager {
             python_dir,
             models_dir,
             state: Mutex::new(None),
+            ready_models: RwLock::new(HashSet::new()),
         })
     }
 
@@ -84,6 +91,22 @@ impl SidecarManager {
                 tracing::warn!("python sidecar kill failed: {e}");
             }
         }
+        self.ready_models.write().await.clear();
+    }
+
+    /// Mark a sidecar model slug as ready (called by download driver on success).
+    pub async fn mark_ready(&self, slug: &str) {
+        self.ready_models.write().await.insert(slug.to_string());
+    }
+
+    /// Check whether a sidecar model slug is currently known-ready.
+    pub async fn is_ready(&self, slug: &str) -> bool {
+        self.ready_models.read().await.contains(slug)
+    }
+
+    /// Mark a sidecar model slug as unloaded.
+    pub async fn mark_unloaded(&self, slug: &str) {
+        self.ready_models.write().await.remove(slug);
     }
 }
 
@@ -125,6 +148,11 @@ async fn spawn(python_dir: &PathBuf, models_dir: &str) -> Result<Running, String
         ])
         .env("DATA_LOCAL_PATH", derive_data_local_path(models_dir))
         .env("AI_MODELS_DIR", models_dir)
+        // Python sidecar's `app.config.Settings` reads the `MODELS_DIR` env var
+        // (pydantic-settings, case-insensitive). Without it the default
+        // `/data/models` is used, which fails with "Permission denied: /data"
+        // outside of Docker.
+        .env("MODELS_DIR", models_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
@@ -134,17 +162,18 @@ async fn spawn(python_dir: &PathBuf, models_dir: &str) -> Result<Running, String
     let stdout = child.stdout.take().ok_or("child stdout missing")?;
     let stderr = child.stderr.take().ok_or("child stderr missing")?;
 
-    // Spawn a task that logs stderr continuously so `uv sync` output is visible.
+    // Drain stdout in the background (uvicorn logs to stderr; stdout should be
+    // empty but must still be drained so the pipe buffer doesn't fill).
     tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr).lines();
+        let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             tracing::info!(target: "python-ocr", "{line}");
         }
     });
 
-    // Parse the bind address from uvicorn's stdout.
+    // Parse the bind address from uvicorn's stderr (that's where uvicorn logs).
     // uvicorn prints: "INFO:     Uvicorn running on http://127.0.0.1:54321 (Press CTRL+C to quit)"
-    let url = timeout(STARTUP_TIMEOUT, read_uvicorn_url(stdout))
+    let url = timeout(STARTUP_TIMEOUT, read_uvicorn_url(stderr))
         .await
         .map_err(|_| "timed out waiting for uvicorn startup banner".to_string())??;
 
@@ -168,8 +197,8 @@ fn derive_data_local_path(models_dir: &str) -> String {
     }
 }
 
-async fn read_uvicorn_url(stdout: tokio::process::ChildStdout) -> Result<String, String> {
-    let mut lines = BufReader::new(stdout).lines();
+async fn read_uvicorn_url(stderr: tokio::process::ChildStderr) -> Result<String, String> {
+    let mut lines = BufReader::new(stderr).lines();
     loop {
         match lines.next_line().await {
             Ok(Some(line)) => {
@@ -185,7 +214,7 @@ async fn read_uvicorn_url(stdout: tokio::process::ChildStdout) -> Result<String,
                 }
             }
             Ok(None) => return Err("uvicorn exited before printing bind URL".into()),
-            Err(e) => return Err(format!("reading uvicorn stdout failed: {e}")),
+            Err(e) => return Err(format!("reading uvicorn stderr failed: {e}")),
         }
     }
 }

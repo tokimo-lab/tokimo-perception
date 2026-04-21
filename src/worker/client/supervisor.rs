@@ -136,10 +136,34 @@ impl Supervisor {
         // Best-effort: make sure the old socket is gone so bind() doesn't fail.
         let _ = std::fs::remove_file(&self.cfg.socket_path);
 
-        let child = cmd
-            .kill_on_drop(false)
+        let mut child = cmd
+            .kill_on_drop(true)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
             .spawn()
             .map_err(|e| RpcError::Transport(format!("spawn ai-worker: {e}")))?;
+
+        // Forward worker stdout/stderr into the parent's tracing subscriber so
+        // `/api/dev/logs` picks them up. Without this, worker logs only land on
+        // the parent's inherited stderr and are invisible from the HTTP API.
+        if let Some(stdout) = child.stdout.take() {
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let mut lines = BufReader::new(stdout).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    tracing::info!(target: "ai_worker", "{line}");
+                }
+            });
+        }
+        if let Some(stderr) = child.stderr.take() {
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    tracing::info!(target: "ai_worker", "{line}");
+                }
+            });
+        }
 
         st.child = Some(child);
         st.generation = st.generation.wrapping_add(1);

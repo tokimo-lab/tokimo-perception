@@ -116,8 +116,61 @@ async fn download_category(
     on_progress: &Option<ProgressFn>,
 ) -> Result<(), String> {
     let dir = &config.models_dir;
-    let downloader = ModelDownloader::new(reqwest::Client::new());
+    let http = reqwest::Client::new();
+    let downloader = ModelDownloader::new(http.clone());
     let mut zip_downloaded: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // Pre-announce pass: for every file we're about to download, HEAD its URL
+    // to learn `Content-Length` and emit a `pending` frame with (0, total).
+    // This lets the server-side aggregator know the full model total from the
+    // first frame, so multi-file downloads (e.g. RapidOCR = det + rec) produce
+    // a single monotonic 0→100% bar instead of jumping/resetting as new files
+    // start. Best-effort: if HEAD fails we skip the announce and the download
+    // still works (bar just starts without a known total for that file).
+    if let Some(cb) = on_progress.as_ref() {
+        let mut announced_zips: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for f in MODEL_FILES {
+            if f.category != category {
+                continue;
+            }
+            let full_path = format!("{}/{}", dir, f.rel_path);
+            if Path::new(&full_path).exists() {
+                continue;
+            }
+            let probe_url = match f.url.split_once('#') {
+                Some((zip_url, _)) => {
+                    if !announced_zips.insert(zip_url.to_string()) {
+                        continue;
+                    }
+                    zip_url
+                }
+                None => f.url,
+            };
+            // Note: `resp.content_length()` often returns `Some(0)` on
+            // HuggingFace LFS-backed URLs after the CDN redirect, even when
+            // the final response carries a proper `Content-Length` header.
+            // Read the raw header to be robust.
+            let total = match http.head(probe_url).send().await {
+                Ok(resp) if resp.status().is_success() => resp
+                    .headers()
+                    .get(reqwest::header::CONTENT_LENGTH)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .or_else(|| resp.content_length())
+                    .unwrap_or(0),
+                Ok(resp) => {
+                    tracing::debug!(url = %probe_url, status = %resp.status(), "pre-announce HEAD non-2xx");
+                    0
+                }
+                Err(e) => {
+                    tracing::debug!(url = %probe_url, error = %e, "pre-announce HEAD failed");
+                    0
+                }
+            };
+            cb(f.rel_path, "pending", 0, 0, total);
+        }
+    }
 
     for f in MODEL_FILES {
         if f.category != category {

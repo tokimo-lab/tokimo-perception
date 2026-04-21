@@ -119,11 +119,11 @@ fn t_cap(l: &LocaleBundle, key: &str) -> String {
 
 // ---------------- Public entry ----------------
 
-pub fn build_catalog(ai: &Arc<AiService>, req: &wire::CatalogRequest) -> wire::ModelCatalog {
+pub async fn build_catalog(ai: &Arc<AiService>, req: &wire::CatalogRequest) -> wire::ModelCatalog {
     let l = pick_locale(&req.languages);
     let mut sections = Vec::new();
 
-    sections.push(build_ocr_section(ai, l));
+    sections.push(build_ocr_section(ai, l).await);
     sections.push(build_clip_section(ai, l));
     sections.push(build_face_section(ai, l));
     sections.push(build_stt_section(ai, l));
@@ -136,53 +136,50 @@ pub fn build_catalog(ai: &Arc<AiService>, req: &wire::CatalogRequest) -> wire::M
 
 // ---------------- OCR ----------------
 
-fn build_ocr_section(ai: &Arc<AiService>, l: &LocaleBundle) -> wire::CatalogSection {
+async fn build_ocr_section(ai: &Arc<AiService>, l: &LocaleBundle) -> wire::CatalogSection {
     let text = t_section(l, "ocr");
-    let models = ai
-        .ocr_available_models()
-        .into_iter()
-        .map(|m| {
-            let cat_id = format!("ocr.{}", m.id);
-            let txt = t_model(l, &cat_id);
-            let is_mobile = m.id == "pp-ocrv5-mobile";
-            let is_sidecar = m.id == MODEL_GOT_OCR_2;
-            let ready = if is_sidecar {
-                false // sidecar readiness is tracked by the python process, not here
-            } else if is_mobile {
-                ai.ocr_mobile_models_ready()
+    let mut models = Vec::new();
+    for m in ai.ocr_available_models().into_iter() {
+        let cat_id = format!("ocr.{}", m.id);
+        let txt = t_model(l, &cat_id);
+        let is_mobile = m.id == "pp-ocrv5-mobile";
+        let is_sidecar = m.id == MODEL_GOT_OCR_2;
+        let ready = if is_sidecar {
+            ai.sidecar().is_ready(m.id).await
+        } else if is_mobile {
+            ai.ocr_mobile_models_ready()
+        } else {
+            ai.ocr_server_models_ready()
+        };
+        let name = if txt.name == cat_id { m.display_name.to_string() } else { txt.name };
+        models.push(wire::CatalogModel {
+            id: cat_id,
+            name,
+            description: txt.description,
+            size_mb: None,
+            attrs: vec![wire::CatalogAttr {
+                key: "provider".into(),
+                label: t_attr(l, "provider"),
+                value: if is_sidecar {
+                    t_attr(l, "provider_sidecar")
+                } else {
+                    t_attr(l, "provider_native")
+                },
+            }],
+            capabilities: vec![t_cap(l, "text"), t_cap(l, "blocks")],
+            provider: if is_sidecar { "python-sidecar".into() } else { "rust-native".into() },
+            state: if ready {
+                wire::ModelState::Ready
             } else {
-                ai.ocr_server_models_ready()
-            };
-            let name = if txt.name == cat_id { m.display_name.to_string() } else { txt.name };
-            wire::CatalogModel {
-                id: cat_id,
-                name,
-                description: txt.description,
-                size_mb: None,
-                attrs: vec![wire::CatalogAttr {
-                    key: "provider".into(),
-                    label: t_attr(l, "provider"),
-                    value: if is_sidecar {
-                        t_attr(l, "provider_sidecar")
-                    } else {
-                        t_attr(l, "provider_native")
-                    },
-                }],
-                capabilities: vec![t_cap(l, "text"), t_cap(l, "blocks")],
-                provider: if is_sidecar { "python-sidecar".into() } else { "rust-native".into() },
-                state: if ready {
-                    wire::ModelState::Ready
-                } else {
-                    wire::ModelState::NotDownloaded
-                },
-                actions: if ready {
-                    vec![wire::ModelAction::Remove]
-                } else {
-                    vec![wire::ModelAction::Download]
-                },
-            }
-        })
-        .collect();
+                wire::ModelState::NotDownloaded
+            },
+            actions: if ready {
+                vec![wire::ModelAction::Remove]
+            } else {
+                vec![wire::ModelAction::Download]
+            },
+        });
+    }
     wire::CatalogSection {
         id: "ocr".into(),
         title: text.title,
@@ -365,6 +362,7 @@ pub fn route_for(model_id: &str) -> ModelRoute {
     };
     match section {
         "ocr" if slug == "pp-ocrv5-mobile" => ModelRoute::OcrMobile,
+        "ocr" if slug == MODEL_GOT_OCR_2 => ModelRoute::Sidecar(slug.to_string()),
         "ocr" => ModelRoute::OcrServer,
         "clip" => ModelRoute::Clip,
         "face" => ModelRoute::Face,

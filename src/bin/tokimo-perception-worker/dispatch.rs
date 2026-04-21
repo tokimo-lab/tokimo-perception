@@ -159,7 +159,7 @@ async fn unary_inner(ai: &Arc<AiService>, route: &str, req_bytes: &[u8]) -> RpcR
         }
         routes::CATALOG => {
             let req: wire::CatalogRequest = decode(req_bytes).unwrap_or(wire::CatalogRequest { languages: Vec::new() });
-            let cat = catalog::build_catalog(ai, &req);
+            let cat = catalog::build_catalog(ai, &req).await;
             encode::<RpcResult<wire::ModelCatalog>>(&Ok(cat))
         }
         routes::MODEL_UNLOAD => {
@@ -172,6 +172,7 @@ async fn unary_inner(ai: &Arc<AiService>, route: &str, req_bytes: &[u8]) -> RpcR
                     .timeout(std::time::Duration::from_secs(30))
                     .send()
                     .await;
+                ai.sidecar().mark_unloaded(&slug).await;
             }
             encode::<RpcResult<wire::ShutdownResponse>>(&Ok(wire::ShutdownResponse { ok: true }))
         }
@@ -253,13 +254,16 @@ async fn server_stream_inner(
             let req: wire::ModelActionRequest = decode(req_bytes)?;
             let model_id = req.model_id.clone();
             let route = catalog::route_for(&model_id);
+            tracing::debug!(%model_id, "worker: MODEL_DOWNLOAD entered");
             let tx_cat = tx.clone();
-            // Emit the catalog model id on every progress frame so the client can
-            // correlate without parsing internal file names.
-            let mid_for_prog = model_id.clone();
-            let progress_native: tokimo_perception::models::ProgressFn = Box::new(move |_file, status, pct, dl, total| {
+            let progress_native: tokimo_perception::models::ProgressFn = Box::new(move |file, status, pct, dl, total| {
+                // Pass the real per-file name so the rust-server side can
+                // aggregate multi-file downloads (e.g. RapidOCR = det + rec)
+                // into a single monotonic progress bar. Collapsing all files
+                // into one key would make the bar reset each time a new file
+                // starts.
                 let frame = wire::ProgressFrame::Progress {
-                    file_name: mid_for_prog.clone(),
+                    file_name: file.to_string(),
                     status: status.to_string(),
                     percent: u32::from(pct),
                     downloaded_bytes: dl,
@@ -316,7 +320,9 @@ async fn server_stream_inner(
                     ai.download_stt_model(&slug, progress_stt).await.map_err(map_err)?;
                 }
                 catalog::ModelRoute::Sidecar(slug) => {
+                    tracing::debug!(%model_id, %slug, "worker: entering run_sidecar_download");
                     run_sidecar_download(ai, &slug, &model_id, &tx).await?;
+                    tracing::debug!(%model_id, %slug, "worker: run_sidecar_download returned Ok");
                 }
                 catalog::ModelRoute::Unknown => {
                     return Err(RpcError::BadRequest(format!("unknown model id: {model_id}")));
@@ -339,17 +345,21 @@ async fn run_sidecar_download(
     model_id: &str,
     tx: &mpsc::Sender<RpcResult<wire::ProgressFrame>>,
 ) -> RpcResult<()> {
+    tracing::debug!(%slug, %model_id, "run_sidecar_download: calling ensure_running");
     let base = ai.sidecar().ensure_running().await.map_err(map_err)?;
+    tracing::debug!(%slug, %base, "run_sidecar_download: sidecar base url");
     let base = base.trim_end_matches('/').to_string();
     let client = reqwest::Client::new();
 
     // Kick off background load
+    tracing::debug!(%slug, "run_sidecar_download: POSTing /models/{slug}/load");
     let resp = client
         .post(format!("{base}/models/{slug}/load"))
         .timeout(std::time::Duration::from_secs(30))
         .send()
         .await
         .map_err(|e| RpcError::Internal(format!("sidecar load request failed: {e}")))?;
+    tracing::debug!(%slug, status = %resp.status(), "run_sidecar_download: POST returned");
     if !resp.status().is_success() {
         let text = resp.text().await.unwrap_or_default();
         return Err(RpcError::Internal(format!("sidecar load error: {text}")));
@@ -419,7 +429,10 @@ async fn run_sidecar_download(
             .unwrap_or((0, 0, 0));
 
         match status.as_str() {
-            "ready" => return Ok(()),
+            "ready" => {
+                ai.sidecar().mark_ready(slug).await;
+                return Ok(());
+            }
             "error" => {
                 let msg = model
                     .get("error_message")

@@ -91,14 +91,32 @@ async fn write_header<W: AsyncWrite + Unpin>(w: &mut W, kind: &str, route: &str)
 }
 
 pub async fn read_header<R: AsyncRead + Unpin>(r: &mut R) -> RpcResult<(String, String)> {
-    use tokio::io::AsyncBufReadExt;
-    let mut buf = tokio::io::BufReader::new(r);
-    let mut line = String::new();
-    let n = buf.read_line(&mut line).await?;
-    if n == 0 {
-        return Err(RpcError::Transport("eof before header".into()));
+    // NOTE: must NOT use BufReader here — its read-ahead buffer would swallow
+    // the bytes of the following length-prefixed frame and they'd be lost when
+    // the BufReader is dropped. Read one byte at a time up to '\n'. The header
+    // is short (a few dozen bytes) and only read once per connection, so the
+    // extra syscalls are irrelevant.
+    use tokio::io::AsyncReadExt;
+    let mut line: Vec<u8> = Vec::with_capacity(64);
+    let mut byte = [0u8; 1];
+    loop {
+        match r.read_exact(&mut byte).await {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof && line.is_empty() => {
+                return Err(RpcError::Transport("eof before header".into()));
+            }
+            Err(e) => return Err(e.into()),
+        }
+        if byte[0] == b'\n' {
+            break;
+        }
+        line.push(byte[0]);
+        if line.len() > 1024 {
+            return Err(RpcError::Transport("header too long".into()));
+        }
     }
-    let line = line.trim_end_matches('\n');
+    let line = std::str::from_utf8(&line)
+        .map_err(|e| RpcError::Transport(format!("header not utf8: {e}")))?;
     let mut parts = line.splitn(2, ' ');
     let kind = parts.next().unwrap_or("").to_string();
     let route = parts.next().unwrap_or("").to_string();

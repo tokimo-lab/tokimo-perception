@@ -8,8 +8,9 @@ pub struct AiConfig {
     pub enable_clip: bool,
     pub enable_face: bool,
     pub enable_stt: bool,
-    /// Optional URL for the VLM OCR sidecar (GOT-OCR-2, PP-ChatOCR-v3).
-    pub ocr_sidecar_url: Option<String>,
+    /// Optional override for the embedded Python OCR sidecar source directory.
+    /// `None` resolves to `<worker-dir>/python` or `CARGO_MANIFEST_DIR/python`.
+    pub python_sidecar_dir: Option<String>,
     /// Detection resolution limit — longest image side in pixels.
     /// `None` uses the built-in default (4096). Lower values speed up detection
     /// at the cost of missing small text.
@@ -25,7 +26,7 @@ impl Default for AiConfig {
             enable_clip: true,
             enable_face: true,
             enable_stt: true,
-            ocr_sidecar_url: None,
+            python_sidecar_dir: None,
             ocr_det_max_side: None,
         }
     }

@@ -128,10 +128,6 @@ impl AiWorkerClient {
         self.info.load().models_dir.clone()
     }
 
-    pub fn ocr_sidecar_url(&self) -> Option<String> {
-        self.info.load().ocr_sidecar_url.clone()
-    }
-
     pub fn ocr_det_max_side(&self) -> Option<u32> {
         self.info.load().ocr_det_max_side
     }
@@ -359,7 +355,6 @@ fn empty_info() -> wire::WorkerInfo {
     wire::WorkerInfo {
         accel_provider: wire::AccelProvider::Cpu,
         models_dir: String::new(),
-        ocr_sidecar_url: None,
         ocr_det_max_side: None,
         ocr_enabled: false,
         clip_enabled: false,

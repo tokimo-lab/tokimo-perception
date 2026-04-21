@@ -8,6 +8,7 @@ use tokio::sync::{OnceCell, RwLock};
 
 use crate::ocr::OcrItem;
 use crate::ocr_backend::{OcrBackend, PaddleOcrVariant};
+use crate::sidecar::SidecarManager;
 
 /// Known model identifiers.
 pub const MODEL_PP_OCRV5_MOBILE: &str = "pp-ocrv5-mobile";
@@ -84,22 +85,22 @@ impl BackendSlot {
 pub struct OcrManager {
     models_dir: String,
     backends: HashMap<&'static str, BackendSlot>,
-    sidecar_url: Option<String>,
+    sidecar: Arc<SidecarManager>,
     last_use: AtomicU64,
     /// Detection resolution limit (longest side in pixels).
     det_max_side: Option<u32>,
 }
 
 impl OcrManager {
-    pub fn new(models_dir: String, sidecar_url: Option<String>) -> Self {
-        Self::with_options(models_dir, sidecar_url, None)
+    pub fn new(models_dir: String, sidecar: Arc<SidecarManager>) -> Self {
+        Self::with_options(models_dir, sidecar, None)
     }
 
-    pub fn with_max_side(models_dir: String, sidecar_url: Option<String>, det_max_side: Option<u32>) -> Self {
-        Self::with_options(models_dir, sidecar_url, det_max_side)
+    pub fn with_max_side(models_dir: String, sidecar: Arc<SidecarManager>, det_max_side: Option<u32>) -> Self {
+        Self::with_options(models_dir, sidecar, det_max_side)
     }
 
-    pub fn with_options(models_dir: String, sidecar_url: Option<String>, det_max_side: Option<u32>) -> Self {
+    pub fn with_options(models_dir: String, sidecar: Arc<SidecarManager>, det_max_side: Option<u32>) -> Self {
         let mut backends: HashMap<&'static str, BackendSlot> = HashMap::new();
         backends.insert(MODEL_PP_OCRV5_MOBILE, BackendSlot::new());
         backends.insert(MODEL_RAPID_OCR_RUST, BackendSlot::new());
@@ -107,7 +108,7 @@ impl OcrManager {
         Self {
             models_dir,
             backends,
-            sidecar_url,
+            sidecar,
             last_use: AtomicU64::new(0),
             det_max_side,
         }
@@ -118,13 +119,10 @@ impl OcrManager {
     pub async fn ocr(&self, model_name: &str, image_bytes: &[u8]) -> Result<Vec<OcrItem>, String> {
         self.last_use.store(crate::epoch_secs(), Ordering::Relaxed);
 
-        // VLM models: call sidecar HTTP endpoint directly (async)
+        // VLM models: ensure sidecar is running, then call directly
         if model_name == MODEL_GOT_OCR_2 {
-            let sidecar_url = self
-                .sidecar_url
-                .as_deref()
-                .ok_or_else(|| format!("VLM OCR backend '{model_name}' requires OCR_SIDECAR_URL to be configured"))?;
-            return vlm_ocr_via_sidecar(sidecar_url, model_name, image_bytes).await;
+            let sidecar_url = self.sidecar.ensure_running().await?;
+            return vlm_ocr_via_sidecar(&sidecar_url, model_name, image_bytes).await;
         }
 
         // Local Paddle models: decode image (fast CPU op) then run async ONNX inference.
@@ -144,16 +142,13 @@ impl OcrManager {
         vlm_model: &str,
         image_bytes: &[u8],
     ) -> Result<(Vec<OcrItem>, Option<serde_json::Value>), String> {
-        let sidecar_url = self
-            .sidecar_url
-            .as_deref()
-            .ok_or_else(|| "Hybrid OCR requires OCR_SIDECAR_URL to be configured".to_string())?;
+        let sidecar_url = self.sidecar.ensure_running().await?;
 
         // 1. Run detection model for bounding boxes
         let det_items = self.ocr(det_model, image_bytes).await?;
 
         // 2. Send image + det_blocks to sidecar for VLM recognition + merge
-        hybrid_ocr_via_sidecar(sidecar_url, image_bytes, &det_items, vlm_model).await
+        hybrid_ocr_via_sidecar(&sidecar_url, image_bytes, &det_items, vlm_model).await
     }
 
     /// Return the epoch timestamp of last use (0 if never used).

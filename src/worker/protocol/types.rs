@@ -47,7 +47,6 @@ pub struct AiStatus {
 pub struct WorkerInfo {
     pub accel_provider: AccelProvider,
     pub models_dir: String,
-    pub ocr_sidecar_url: Option<String>,
     pub ocr_det_max_side: Option<u32>,
     pub ocr_enabled: bool,
     pub clip_enabled: bool,

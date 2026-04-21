@@ -55,6 +55,7 @@ pub mod ocr;
 pub mod ocr_backend;
 pub mod ocr_detector;
 pub mod ocr_manager;
+pub mod sidecar;
 pub mod stt;
 mod tokenizer;
 pub mod worker;
@@ -368,6 +369,37 @@ fn epoch_secs() -> u64 {
         .as_secs()
 }
 
+/// Resolve the path to the embedded Python sidecar source directory.
+///
+/// Resolution order:
+/// 1. `config.python_sidecar_dir` (explicit override)
+/// 2. `$TOKIMO_PERCEPTION_PYTHON_DIR`
+/// 3. `<exe_dir>/../../packages/tokimo-perception/python` (dev builds under `target/`)
+/// 4. `CARGO_MANIFEST_DIR/python` (library tests)
+fn python_sidecar_dir(cfg: &AiConfig) -> std::path::PathBuf {
+    use std::path::PathBuf;
+
+    if let Some(p) = &cfg.python_sidecar_dir {
+        return PathBuf::from(p);
+    }
+    if let Ok(p) = std::env::var("TOKIMO_PERCEPTION_PYTHON_DIR") {
+        return PathBuf::from(p);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        // exe at <repo>/target/debug/tokimo-perception-worker → climb to repo root
+        let mut cur = exe.parent().map(std::path::Path::to_path_buf);
+        for _ in 0..6 {
+            let Some(dir) = cur else { break };
+            let candidate = dir.join("packages/tokimo-perception/python");
+            if candidate.exists() {
+                return candidate;
+            }
+            cur = dir.parent().map(std::path::Path::to_path_buf);
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("python")
+}
+
 /// Shared AI service state. Holds lazy-loaded ONNX model sessions.
 ///
 /// Wrap in `Arc` and store in your app state. All methods are `&self`.
@@ -375,6 +407,7 @@ fn epoch_secs() -> u64 {
 pub struct AiService {
     config: AiConfig,
     ocr_manager: OnceCell<ocr_manager::OcrManager>,
+    sidecar: Arc<sidecar::SidecarManager>,
     // Heavy models — evictable (wrapped in Arc for shared ownership during eviction)
     clip: RwLock<Option<Arc<clip::ClipService>>>,
     clip_last_use: AtomicU64,
@@ -399,6 +432,10 @@ impl AiService {
         }
 
         Arc::new(Self {
+            sidecar: sidecar::SidecarManager::new(
+                python_sidecar_dir(&config),
+                config.models_dir.clone(),
+            ),
             config,
             ocr_manager: OnceCell::new(),
             clip: RwLock::new(None),
@@ -410,6 +447,11 @@ impl AiService {
             streaming_stt: RwLock::new(None),
             streaming_stt_last_use: AtomicU64::new(0),
         })
+    }
+
+    /// Access the Python OCR sidecar manager (lazy-spawned on first use).
+    pub fn sidecar(&self) -> &Arc<sidecar::SidecarManager> {
+        &self.sidecar
     }
 
     /// Start background eviction loop. Call once after creating the service.
@@ -604,7 +646,7 @@ impl AiService {
             .get_or_try_init(|| async {
                 Ok::<_, String>(ocr_manager::OcrManager::with_options(
                     self.config.models_dir.clone(),
-                    self.config.ocr_sidecar_url.clone(),
+                    Arc::clone(&self.sidecar),
                     self.config.ocr_det_max_side,
                 ))
             })
@@ -630,7 +672,7 @@ impl AiService {
             .get_or_try_init(|| async {
                 Ok::<_, String>(ocr_manager::OcrManager::with_options(
                     self.config.models_dir.clone(),
-                    self.config.ocr_sidecar_url.clone(),
+                    Arc::clone(&self.sidecar),
                     self.config.ocr_det_max_side,
                 ))
             })

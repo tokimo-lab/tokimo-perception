@@ -58,7 +58,6 @@ async fn unary_inner(ai: &Arc<AiService>, route: &str, req_bytes: &[u8]) -> RpcR
             let info = wire::WorkerInfo {
                 accel_provider: convert::accel_to_wire(st.accel_provider),
                 models_dir: cfg.models_dir.clone(),
-                ocr_sidecar_url: cfg.ocr_sidecar_url.clone(),
                 ocr_det_max_side: cfg.ocr_det_max_side,
                 ocr_enabled: ai.is_ocr_enabled(),
                 clip_enabled: ai.is_clip_enabled(),
@@ -164,10 +163,16 @@ async fn unary_inner(ai: &Arc<AiService>, route: &str, req_bytes: &[u8]) -> RpcR
             encode::<RpcResult<wire::ModelCatalog>>(&Ok(cat))
         }
         routes::MODEL_UNLOAD => {
-            // Best-effort unload is not yet supported by AiService; acknowledge so the
-            // UI flow stays consistent. Once AiService exposes per-model unload we
-            // can plumb it through here without changing the wire protocol.
-            let _: wire::ModelActionRequest = decode(req_bytes)?;
+            let req: wire::ModelActionRequest = decode(req_bytes)?;
+            if let catalog::ModelRoute::Sidecar(slug) = catalog::route_for(&req.model_id) {
+                let url = ai.sidecar().ensure_running().await.map_err(map_err)?;
+                let client = reqwest::Client::new();
+                let _ = client
+                    .post(format!("{}/models/{slug}/unload", url.trim_end_matches('/')))
+                    .timeout(std::time::Duration::from_secs(30))
+                    .send()
+                    .await;
+            }
             encode::<RpcResult<wire::ShutdownResponse>>(&Ok(wire::ShutdownResponse { ok: true }))
         }
         other => Err(RpcError::NotFound(format!("route not found: {other}"))),
@@ -310,10 +315,8 @@ async fn server_stream_inner(
                     };
                     ai.download_stt_model(&slug, progress_stt).await.map_err(map_err)?;
                 }
-                catalog::ModelRoute::Sidecar(_) => {
-                    return Err(RpcError::BadRequest(
-                        "sidecar model download not yet supported by worker".into(),
-                    ));
+                catalog::ModelRoute::Sidecar(slug) => {
+                    run_sidecar_download(ai, &slug, &model_id, &tx).await?;
                 }
                 catalog::ModelRoute::Unknown => {
                     return Err(RpcError::BadRequest(format!("unknown model id: {model_id}")));
@@ -323,5 +326,117 @@ async fn server_stream_inner(
             Ok(())
         }
         other => Err(RpcError::NotFound(format!("stream route not found: {other}"))),
+    }
+}
+
+/// Drive a sidecar model download: ensure Python sidecar is running, POST
+/// `/models/{slug}/load`, then poll `/models` emitting `ProgressFrame`s. Mirrors
+/// the status → progress shape used for native category downloads so the
+/// upstream aggregator treats both paths identically.
+async fn run_sidecar_download(
+    ai: &Arc<AiService>,
+    slug: &str,
+    model_id: &str,
+    tx: &mpsc::Sender<RpcResult<wire::ProgressFrame>>,
+) -> RpcResult<()> {
+    let base = ai.sidecar().ensure_running().await.map_err(map_err)?;
+    let base = base.trim_end_matches('/').to_string();
+    let client = reqwest::Client::new();
+
+    // Kick off background load
+    let resp = client
+        .post(format!("{base}/models/{slug}/load"))
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| RpcError::Internal(format!("sidecar load request failed: {e}")))?;
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(RpcError::Internal(format!("sidecar load error: {text}")));
+    }
+
+    // Emit initial "downloading 0%" so the aggregator flips state immediately
+    let _ = tx
+        .try_send(Ok(wire::ProgressFrame::Progress {
+            file_name: model_id.to_string(),
+            status: "downloading".into(),
+            percent: 0,
+            downloaded_bytes: 0,
+            total_bytes: 0,
+        }));
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60 * 30);
+    loop {
+        if std::time::Instant::now() > deadline {
+            return Err(RpcError::Internal(
+                "sidecar download timed out after 30 minutes".into(),
+            ));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let resp = match client
+            .get(format!("{base}/models"))
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => r,
+            _ => continue,
+        };
+        let list: Vec<serde_json::Value> = match resp.json().await {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let Some(model) = list
+            .into_iter()
+            .find(|m| m.get("id").and_then(|v| v.as_str()) == Some(slug))
+        else {
+            continue;
+        };
+        let status = model
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let (percent, downloaded, total) = model
+            .get("progress")
+            .map(|p| {
+                let pct = p
+                    .get("percent")
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or(0.0)
+                    .clamp(0.0, 100.0) as u32;
+                let dl = p
+                    .get("downloaded_bytes")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
+                let tot = p
+                    .get("total_bytes")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
+                (pct, dl, tot)
+            })
+            .unwrap_or((0, 0, 0));
+
+        match status.as_str() {
+            "ready" => return Ok(()),
+            "error" => {
+                let msg = model
+                    .get("error_message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("sidecar model load failed")
+                    .to_string();
+                return Err(RpcError::Internal(msg));
+            }
+            _ => {
+                let _ = tx.try_send(Ok(wire::ProgressFrame::Progress {
+                    file_name: model_id.to_string(),
+                    status: "downloading".into(),
+                    percent,
+                    downloaded_bytes: downloaded,
+                    total_bytes: total,
+                }));
+            }
+        }
     }
 }

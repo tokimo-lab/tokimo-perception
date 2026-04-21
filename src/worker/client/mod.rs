@@ -10,6 +10,7 @@
 
 #![allow(clippy::module_name_repetitions)]
 
+#[allow(clippy::module_inception)]
 mod client;
 mod settings;
 mod supervisor;

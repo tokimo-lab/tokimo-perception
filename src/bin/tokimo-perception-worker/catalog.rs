@@ -175,7 +175,12 @@ fn build_ocr_section(ai: &Arc<AiService>, l: &LocaleBundle) -> wire::CatalogSect
                 } else {
                     wire::ModelState::NotDownloaded
                 },
-                actions: if ready {
+                // Sidecar models are managed by an external Python process and
+                // are loaded lazily on first use; do not expose Download/Remove
+                // actions here to avoid dispatching to the perception worker.
+                actions: if is_sidecar {
+                    vec![]
+                } else if ready {
                     vec![wire::ModelAction::Remove]
                 } else {
                     vec![wire::ModelAction::Download]

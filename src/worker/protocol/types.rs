@@ -268,6 +268,7 @@ pub struct CatalogSection {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CatalogModel {
     /// Globally unique id in `<section>.<slug>` form (e.g. `ocr.ppocrv5-mobile`).
     pub id: String,
@@ -295,6 +296,7 @@ pub struct CatalogAttr {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ModelState {
     NotDownloaded,
+    #[serde(rename_all = "camelCase")]
     Downloading {
         percent: u32,
         downloaded: u64,
@@ -323,6 +325,7 @@ pub struct CatalogRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelActionRequest {
     pub model_id: String,
 }

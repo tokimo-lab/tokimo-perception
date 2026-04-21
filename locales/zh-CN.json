@@ -65,7 +65,7 @@
     "cpu_only": "仅 CPU",
     "provider": "来源",
     "provider_native": "Rust 原生",
-    "provider_sidecar": "Python Sidecar"
+    "provider_sidecar": "Python"
   },
   "capabilities": {
     "text": "纯文字",

@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use serde::Deserialize;
+use tokimo_perception::ocr_manager::MODEL_GOT_OCR_2;
 use tokimo_perception::worker::protocol::types as wire;
 use tokimo_perception::AiService;
 
@@ -144,7 +145,10 @@ fn build_ocr_section(ai: &Arc<AiService>, l: &LocaleBundle) -> wire::CatalogSect
             let cat_id = format!("ocr.{}", m.id);
             let txt = t_model(l, &cat_id);
             let is_mobile = m.id == "pp-ocrv5-mobile";
-            let ready = if is_mobile {
+            let is_sidecar = m.id == MODEL_GOT_OCR_2;
+            let ready = if is_sidecar {
+                false // sidecar readiness is tracked by the python process, not here
+            } else if is_mobile {
                 ai.ocr_mobile_models_ready()
             } else {
                 ai.ocr_server_models_ready()
@@ -158,10 +162,14 @@ fn build_ocr_section(ai: &Arc<AiService>, l: &LocaleBundle) -> wire::CatalogSect
                 attrs: vec![wire::CatalogAttr {
                     key: "provider".into(),
                     label: t_attr(l, "provider"),
-                    value: t_attr(l, "provider_native"),
+                    value: if is_sidecar {
+                        t_attr(l, "provider_sidecar")
+                    } else {
+                        t_attr(l, "provider_native")
+                    },
                 }],
                 capabilities: vec![t_cap(l, "text"), t_cap(l, "blocks")],
-                provider: "rust-native".into(),
+                provider: if is_sidecar { "python-sidecar".into() } else { "rust-native".into() },
                 state: if ready {
                     wire::ModelState::Ready
                 } else {

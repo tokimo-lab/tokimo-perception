@@ -4,6 +4,7 @@
 
 #![allow(clippy::match_same_arms)]
 
+mod catalog;
 mod convert;
 mod dispatch;
 mod http;

@@ -1,0 +1,89 @@
+{
+  "sections": {
+    "ocr": {
+      "title": "Text Recognition (OCR)",
+      "description": "Recognize text from images with multi-language and layout support."
+    },
+    "clip": {
+      "title": "Image Embedding (CLIP)",
+      "description": "Generate vector embeddings for image-to-image and text-to-image search."
+    },
+    "face": {
+      "title": "Face Recognition",
+      "description": "Detect and cluster faces in photos."
+    },
+    "stt": {
+      "title": "Speech to Text",
+      "description": "Transcribe audio to text."
+    },
+    "sidecar": {
+      "title": "Python Extension Models",
+      "description": "Advanced models hosted by the Python sidecar (VLM / multimodal)."
+    }
+  },
+  "models": {
+    "ocr.rapid-ocr-rust": {
+      "name": "RapidOCR",
+      "description": "PP-OCRv5 Server detection + CTC recognition, Contours rotated-text detection, native ONNX Runtime inference."
+    },
+    "ocr.pp-ocrv5-mobile": {
+      "name": "PP-OCRv5 Mobile",
+      "description": "PP-OCRv5 Mobile lightweight model, axis-aligned detection, suited for fast bulk scanning."
+    },
+    "clip.default": {
+      "name": "CLIP ViT-B/32",
+      "description": "General multimodal embedding model for image search and cross-lingual text queries."
+    },
+    "face.default": {
+      "name": "Face Detection + Embedding",
+      "description": "ONNX-based face detector with 512-dim embedding extractor."
+    },
+    "stt.whisper-base": {
+      "name": "Whisper Base",
+      "description": "OpenAI Whisper base model, ~74 MB, suited for offline transcription."
+    },
+    "stt.whisper-small": {
+      "name": "Whisper Small",
+      "description": "OpenAI Whisper small model, ~244 MB, higher accuracy."
+    },
+    "stt.streaming": {
+      "name": "Streaming Speech Recognition",
+      "description": "Low-latency online speech recognition for real-time voice input."
+    },
+    "sidecar.got-ocr-2": {
+      "name": "GOT-OCR 2.0",
+      "description": "Vision-language model (VLM), end-to-end OCR for complex layouts. Requires GPU."
+    }
+  },
+  "attrs": {
+    "speed": "Speed",
+    "accuracy": "Accuracy",
+    "size": "Size",
+    "gpu": "GPU",
+    "gpu_required": "GPU required",
+    "gpu_recommended": "GPU recommended",
+    "cpu_only": "CPU only",
+    "provider": "Provider",
+    "provider_native": "Rust native",
+    "provider_sidecar": "Python sidecar"
+  },
+  "capabilities": {
+    "text": "Plain text",
+    "blocks": "Text blocks",
+    "paragraphs": "Paragraphs",
+    "formula": "Formula",
+    "table": "Table",
+    "handwriting": "Handwriting",
+    "multilingual": "Multilingual",
+    "realtime": "Real-time"
+  },
+  "actions": {
+    "download": "Download",
+    "unload": "Unload",
+    "remove": "Remove",
+    "loading": "Loading…",
+    "downloading": "Downloading…",
+    "ready": "Ready",
+    "error": "Error"
+  }
+}

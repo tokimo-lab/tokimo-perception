@@ -27,6 +27,11 @@ pub mod routes {
     pub const ENSURE_CATEGORY: &str = "/v1/models/ensure_category"; // streaming progress
     pub const DOWNLOAD_STT: &str = "/v1/models/download_stt"; // streaming progress
 
+    // --- Unified model catalog (settings UI) ---
+    pub const CATALOG: &str = "/v1/catalog";
+    pub const MODEL_DOWNLOAD: &str = "/v1/catalog/download"; // streaming progress by model_id
+    pub const MODEL_UNLOAD: &str = "/v1/catalog/unload"; // unary
+
     pub const OCR: &str = "/v1/ocr";
     pub const OCR_HYBRID: &str = "/v1/ocr_hybrid";
 

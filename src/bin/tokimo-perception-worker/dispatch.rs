@@ -12,6 +12,7 @@ use tokimo_perception::AiService;
 use serde::Serialize;
 use tokio::sync::mpsc;
 
+use crate::catalog;
 use crate::convert;
 
 fn map_err(e: String) -> RpcError {
@@ -157,6 +158,18 @@ async fn unary_inner(ai: &Arc<AiService>, route: &str, req_bytes: &[u8]) -> RpcR
             // Caller handles the actual exit; we just ack.
             encode::<RpcResult<wire::ShutdownResponse>>(&Ok(wire::ShutdownResponse { ok: true }))
         }
+        routes::CATALOG => {
+            let req: wire::CatalogRequest = decode(req_bytes).unwrap_or(wire::CatalogRequest { languages: Vec::new() });
+            let cat = catalog::build_catalog(ai, &req);
+            encode::<RpcResult<wire::ModelCatalog>>(&Ok(cat))
+        }
+        routes::MODEL_UNLOAD => {
+            // Best-effort unload is not yet supported by AiService; acknowledge so the
+            // UI flow stays consistent. Once AiService exposes per-model unload we
+            // can plumb it through here without changing the wire protocol.
+            let _: wire::ModelActionRequest = decode(req_bytes)?;
+            encode::<RpcResult<wire::ShutdownResponse>>(&Ok(wire::ShutdownResponse { ok: true }))
+        }
         other => Err(RpcError::NotFound(format!("route not found: {other}"))),
     }
 }
@@ -228,6 +241,84 @@ async fn server_stream_inner(
                 let _ = tx_clone.try_send(Ok(frame));
             };
             ai.download_stt_model(&req.model_id, progress).await.map_err(map_err)?;
+            let _ = tx.send(Ok(wire::ProgressFrame::Done)).await;
+            Ok(())
+        }
+        routes::MODEL_DOWNLOAD => {
+            let req: wire::ModelActionRequest = decode(req_bytes)?;
+            let model_id = req.model_id.clone();
+            let route = catalog::route_for(&model_id);
+            let tx_cat = tx.clone();
+            // Emit the catalog model id on every progress frame so the client can
+            // correlate without parsing internal file names.
+            let mid_for_prog = model_id.clone();
+            let progress_native: tokimo_perception::models::ProgressFn = Box::new(move |_file, status, pct, dl, total| {
+                let frame = wire::ProgressFrame::Progress {
+                    file_name: mid_for_prog.clone(),
+                    status: status.to_string(),
+                    percent: u32::from(pct),
+                    downloaded_bytes: dl,
+                    total_bytes: total,
+                };
+                let _ = tx_cat.try_send(Ok(frame));
+            });
+            match route {
+                catalog::ModelRoute::OcrServer => {
+                    ai.ensure_category_with_progress(
+                        tokimo_perception::models::ModelCategory::OcrServer,
+                        progress_native,
+                    )
+                    .await
+                    .map_err(map_err)?;
+                }
+                catalog::ModelRoute::OcrMobile => {
+                    ai.ensure_category_with_progress(
+                        tokimo_perception::models::ModelCategory::OcrMobile,
+                        progress_native,
+                    )
+                    .await
+                    .map_err(map_err)?;
+                }
+                catalog::ModelRoute::Clip => {
+                    ai.ensure_category_with_progress(
+                        tokimo_perception::models::ModelCategory::Clip,
+                        progress_native,
+                    )
+                    .await
+                    .map_err(map_err)?;
+                }
+                catalog::ModelRoute::Face => {
+                    ai.ensure_category_with_progress(
+                        tokimo_perception::models::ModelCategory::Face,
+                        progress_native,
+                    )
+                    .await
+                    .map_err(map_err)?;
+                }
+                catalog::ModelRoute::Stt(slug) => {
+                    let tx_stt = tx.clone();
+                    let mid = model_id.clone();
+                    let progress_stt = move |status: &str, pct: u8| {
+                        let frame = wire::ProgressFrame::Progress {
+                            file_name: mid.clone(),
+                            status: status.to_string(),
+                            percent: u32::from(pct),
+                            downloaded_bytes: 0,
+                            total_bytes: 0,
+                        };
+                        let _ = tx_stt.try_send(Ok(frame));
+                    };
+                    ai.download_stt_model(&slug, progress_stt).await.map_err(map_err)?;
+                }
+                catalog::ModelRoute::Sidecar(_) => {
+                    return Err(RpcError::BadRequest(
+                        "sidecar model download not yet supported by worker".into(),
+                    ));
+                }
+                catalog::ModelRoute::Unknown => {
+                    return Err(RpcError::BadRequest(format!("unknown model id: {model_id}")));
+                }
+            }
             let _ = tx.send(Ok(wire::ProgressFrame::Done)).await;
             Ok(())
         }

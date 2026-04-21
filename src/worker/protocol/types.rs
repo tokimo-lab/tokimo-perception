@@ -246,6 +246,87 @@ pub enum ProgressFrame {
     },
 }
 
+// ---------- Model catalog (declarative metadata for settings UI) ----------
+
+/// Ordered, localized list of model sections. Returned by `/v1/catalog`.
+/// All user-visible strings (`title`, `description`, `name`, attribute labels)
+/// are already localized per the `Accept-Language` header supplied by the caller.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelCatalog {
+    pub sections: Vec<CatalogSection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogSection {
+    /// Stable id (`ocr` / `clip` / `face` / `stt` / `sidecar`).
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    /// Lucide icon key (e.g. `"scan-text"`, `"image"`, `"user-round"`).
+    pub icon: String,
+    pub models: Vec<CatalogModel>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogModel {
+    /// Globally unique id in `<section>.<slug>` form (e.g. `ocr.ppocrv5-mobile`).
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub size_mb: Option<u64>,
+    /// Display-only key/label/value tag list (speed, accuracy, …).
+    pub attrs: Vec<CatalogAttr>,
+    /// Capability tags (`"text"`, `"blocks"`, `"formula"`, …).
+    pub capabilities: Vec<String>,
+    /// `"rust-native"` | `"python-sidecar"`.
+    pub provider: String,
+    pub state: ModelState,
+    pub actions: Vec<ModelAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogAttr {
+    pub key: String,
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ModelState {
+    NotDownloaded,
+    Downloading {
+        percent: u32,
+        downloaded: u64,
+        total: u64,
+    },
+    Loading,
+    Ready,
+    Error {
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelAction {
+    Download,
+    Unload,
+    Remove,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogRequest {
+    /// BCP-47 language tags in preference order. Empty = worker default.
+    #[serde(default)]
+    pub languages: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelActionRequest {
+    pub model_id: String,
+}
+
 // ---------- simple response wrappers ----------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,0 +1,89 @@
+{
+  "sections": {
+    "ocr": {
+      "title": "文字识别 (OCR)",
+      "description": "从图片中识别文字内容，支持多语言及版式分析。"
+    },
+    "clip": {
+      "title": "图像语义嵌入 (CLIP)",
+      "description": "为图片生成向量嵌入，用于以图搜图和文字搜图。"
+    },
+    "face": {
+      "title": "人脸识别",
+      "description": "检测并聚类图片中的人脸。"
+    },
+    "stt": {
+      "title": "语音识别 (STT)",
+      "description": "将音频转写为文字。"
+    },
+    "sidecar": {
+      "title": "Python 扩展模型",
+      "description": "由 Python sidecar 托管的高级模型（VLM / 多模态等）。"
+    }
+  },
+  "models": {
+    "ocr.rapid-ocr-rust": {
+      "name": "RapidOCR",
+      "description": "PP-OCRv5 Server 检测 + CTC 识别，支持 Contours 旋转文字检测，ONNX Runtime 原生推理。"
+    },
+    "ocr.pp-ocrv5-mobile": {
+      "name": "PP-OCRv5 Mobile",
+      "description": "PP-OCRv5 Mobile 轻量模型，轴对齐检测，适合大批量快速扫描。"
+    },
+    "clip.default": {
+      "name": "CLIP ViT-B/32",
+      "description": "通用多模态嵌入模型，用于以图搜图和中英文描述检索。"
+    },
+    "face.default": {
+      "name": "人脸检测 + 特征嵌入",
+      "description": "基于 ONNX 的人脸检测与 512 维特征提取。"
+    },
+    "stt.whisper-base": {
+      "name": "Whisper Base",
+      "description": "OpenAI Whisper 基础模型，约 74 MB，适合离线转写。"
+    },
+    "stt.whisper-small": {
+      "name": "Whisper Small",
+      "description": "OpenAI Whisper 小模型，约 244 MB，精度更高。"
+    },
+    "stt.streaming": {
+      "name": "流式语音识别",
+      "description": "低延迟在线语音识别，用于实时语音输入。"
+    },
+    "sidecar.got-ocr-2": {
+      "name": "GOT-OCR 2.0",
+      "description": "视觉语言模型（VLM），端到端 OCR，支持复杂版式，需要 GPU。"
+    }
+  },
+  "attrs": {
+    "speed": "速度",
+    "accuracy": "准确率",
+    "size": "大小",
+    "gpu": "GPU",
+    "gpu_required": "需要 GPU",
+    "gpu_recommended": "建议 GPU",
+    "cpu_only": "仅 CPU",
+    "provider": "来源",
+    "provider_native": "Rust 原生",
+    "provider_sidecar": "Python Sidecar"
+  },
+  "capabilities": {
+    "text": "纯文字",
+    "blocks": "文字区块",
+    "paragraphs": "段落",
+    "formula": "公式",
+    "table": "表格",
+    "handwriting": "手写",
+    "multilingual": "多语言",
+    "realtime": "实时"
+  },
+  "actions": {
+    "download": "下载",
+    "unload": "卸载",
+    "remove": "删除",
+    "loading": "加载中…",
+    "downloading": "下载中…",
+    "ready": "已就绪",
+    "error": "错误"
+  }
+}

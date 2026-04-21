@@ -306,6 +306,43 @@ impl AiWorkerClient {
             .map_err(rpc_to_string)
     }
 
+    // ---------------- Catalog (unified perception API) ----------------
+
+    pub async fn get_catalog(&self, languages: Vec<String>) -> ClientResult<wire::ModelCatalog> {
+        self.ensure_up().await.map_err(rpc_to_string)?;
+        self.mark_activity();
+        let res: RpcResult<wire::ModelCatalog> = self
+            .transport
+            .call(routes::CATALOG, &wire::CatalogRequest { languages })
+            .await;
+        res.map_err(rpc_to_string)
+    }
+
+    pub async fn download_model(
+        &self,
+        model_id: String,
+    ) -> ClientResult<mpsc::Receiver<RpcResult<wire::ProgressFrame>>> {
+        self.ensure_up().await.map_err(rpc_to_string)?;
+        self.mark_activity();
+        self.transport
+            .call_stream::<_, wire::ProgressFrame>(
+                routes::MODEL_DOWNLOAD,
+                &wire::ModelActionRequest { model_id },
+            )
+            .await
+            .map_err(rpc_to_string)
+    }
+
+    pub async fn unload_model(&self, model_id: String) -> ClientResult<()> {
+        self.ensure_up().await.map_err(rpc_to_string)?;
+        self.mark_activity();
+        let res: RpcResult<wire::ShutdownResponse> = self
+            .transport
+            .call(routes::MODEL_UNLOAD, &wire::ModelActionRequest { model_id })
+            .await;
+        res.map(|_| ()).map_err(rpc_to_string)
+    }
+
     // ---------------- Lifecycle ----------------
 
     /// Ask the worker to shut down gracefully. Safe to call even if not up.

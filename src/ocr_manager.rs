@@ -186,21 +186,33 @@ impl OcrManager {
 
     /// List all known models with their current status.
     pub fn available_models(&self) -> Vec<OcrModelInfo> {
+        Self::known_models()
+            .into_iter()
+            .map(|mut info| {
+                info.loaded = self.is_loaded(info.id);
+                info
+            })
+            .collect()
+    }
+
+    /// Static list of all known OCR models (loaded flag is always false).
+    /// Callable without an initialized manager instance.
+    pub fn known_models() -> Vec<OcrModelInfo> {
         vec![
             OcrModelInfo {
                 id: MODEL_RAPID_OCR_RUST,
                 display_name: "RapidOCR",
-                loaded: self.is_loaded(MODEL_RAPID_OCR_RUST),
+                loaded: false,
             },
             OcrModelInfo {
                 id: MODEL_PP_OCRV5_MOBILE,
                 display_name: "PP-OCRv5 Mobile",
-                loaded: self.is_loaded(MODEL_PP_OCRV5_MOBILE),
+                loaded: false,
             },
             OcrModelInfo {
                 id: MODEL_GOT_OCR_2,
                 display_name: "GOT-OCR 2.0",
-                loaded: false, // sidecar model, not tracked locally
+                loaded: false,
             },
         ]
     }

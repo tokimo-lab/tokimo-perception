@@ -137,46 +137,44 @@ pub fn build_catalog(ai: &Arc<AiService>, req: &wire::CatalogRequest) -> wire::M
 
 fn build_ocr_section(ai: &Arc<AiService>, l: &LocaleBundle) -> wire::CatalogSection {
     let text = t_section(l, "ocr");
-    let models = if ai.is_ocr_enabled() {
-        ai.ocr_available_models()
-            .into_iter()
-            .map(|m| {
-                let cat_id = format!("ocr.{}", m.id);
-                let txt = t_model(l, &cat_id);
-                let is_mobile = m.id == "pp-ocrv5-mobile";
-                let ready = if is_mobile {
-                    ai.ocr_mobile_models_ready()
+    let models = ai
+        .ocr_available_models()
+        .into_iter()
+        .map(|m| {
+            let cat_id = format!("ocr.{}", m.id);
+            let txt = t_model(l, &cat_id);
+            let is_mobile = m.id == "pp-ocrv5-mobile";
+            let ready = if is_mobile {
+                ai.ocr_mobile_models_ready()
+            } else {
+                ai.ocr_server_models_ready()
+            };
+            let name = if txt.name == cat_id { m.display_name.to_string() } else { txt.name };
+            wire::CatalogModel {
+                id: cat_id,
+                name,
+                description: txt.description,
+                size_mb: None,
+                attrs: vec![wire::CatalogAttr {
+                    key: "provider".into(),
+                    label: t_attr(l, "provider"),
+                    value: t_attr(l, "provider_native"),
+                }],
+                capabilities: vec![t_cap(l, "text"), t_cap(l, "blocks")],
+                provider: "rust-native".into(),
+                state: if ready {
+                    wire::ModelState::Ready
                 } else {
-                    ai.ocr_server_models_ready()
-                };
-                wire::CatalogModel {
-                    id: cat_id,
-                    name: if txt.name == m.id { m.display_name.to_string() } else { txt.name },
-                    description: txt.description,
-                    size_mb: None,
-                    attrs: vec![wire::CatalogAttr {
-                        key: "provider".into(),
-                        label: t_attr(l, "provider"),
-                        value: t_attr(l, "provider_native"),
-                    }],
-                    capabilities: vec![t_cap(l, "text"), t_cap(l, "blocks")],
-                    provider: "rust-native".into(),
-                    state: if ready {
-                        wire::ModelState::Ready
-                    } else {
-                        wire::ModelState::NotDownloaded
-                    },
-                    actions: if ready {
-                        vec![wire::ModelAction::Remove]
-                    } else {
-                        vec![wire::ModelAction::Download]
-                    },
-                }
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+                    wire::ModelState::NotDownloaded
+                },
+                actions: if ready {
+                    vec![wire::ModelAction::Remove]
+                } else {
+                    vec![wire::ModelAction::Download]
+                },
+            }
+        })
+        .collect();
     wire::CatalogSection {
         id: "ocr".into(),
         title: text.title,

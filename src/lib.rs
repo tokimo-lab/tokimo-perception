@@ -642,7 +642,7 @@ impl AiService {
     pub fn ocr_available_models(&self) -> Vec<ocr_manager::OcrModelInfo> {
         match self.ocr_manager.get() {
             Some(mgr) => mgr.available_models(),
-            None => vec![],
+            None => ocr_manager::OcrManager::known_models(),
         }
     }
 

@@ -86,10 +86,10 @@ impl SidecarManager {
     /// Gracefully stop the sidecar (best-effort, non-blocking kill).
     pub async fn shutdown(&self) {
         let mut guard = self.state.lock().await;
-        if let Some(mut running) = guard.take() {
-            if let Err(e) = running.child.start_kill() {
-                tracing::warn!("python sidecar kill failed: {e}");
-            }
+        if let Some(mut running) = guard.take()
+            && let Err(e) = running.child.start_kill()
+        {
+            tracing::warn!("python sidecar kill failed: {e}");
         }
         self.ready_models.write().await.clear();
     }
@@ -190,9 +190,7 @@ async fn spawn(python_dir: &PathBuf, models_dir: &str) -> Result<Running, String
 fn derive_data_local_path(models_dir: &str) -> String {
     let p = std::path::Path::new(models_dir);
     if p.ends_with("perception") || p.ends_with("ai-models") {
-        p.parent()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| models_dir.to_string())
+        p.parent().map_or_else(|| models_dir.to_string(), |p| p.display().to_string())
     } else {
         models_dir.to_string()
     }

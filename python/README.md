@@ -29,7 +29,7 @@ Download model weights before first use:
 ```bash
 # Into the shared models volume
 huggingface-cli download stepfun-ai/GOT-OCR-2.0-hf \
-  --local-dir data/ai-models/got-ocr-2
+  --local-dir data/perception/got-ocr-2
 ```
 
 Or let the service auto-download from Hugging Face on first request (requires internet access in the container).

@@ -121,12 +121,12 @@ async fn unary_inner(ai: &Arc<AiService>, route: &str, req_bytes: &[u8]) -> RpcR
         routes::CLIP_IMAGE => {
             let req: wire::ClipImageRequest = decode(req_bytes)?;
             let v = ai.clip_image(&req.image).await.map_err(map_err)?;
-            encode::<RpcResult<wire::VecResponse>>(&Ok(wire::VecResponse { data: v }))
+            encode::<RpcResult<Vec<f32>>>(&Ok(v))
         }
         routes::CLIP_TEXT => {
             let req: wire::ClipTextRequest = decode(req_bytes)?;
             let v = ai.clip_text(&req.text).await.map_err(map_err)?;
-            encode::<RpcResult<wire::VecResponse>>(&Ok(wire::VecResponse { data: v }))
+            encode::<RpcResult<Vec<f32>>>(&Ok(v))
         }
         routes::CLIP_CLASSIFY => {
             let req: wire::ClipClassifyRequest = decode(req_bytes)?;

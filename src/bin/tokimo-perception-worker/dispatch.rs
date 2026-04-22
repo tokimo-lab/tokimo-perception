@@ -410,7 +410,7 @@ async fn run_sidecar_download(
             .to_string();
         let (percent, downloaded, total) = model
             .get("progress")
-            .map(|p| {
+            .map_or((0, 0, 0), |p| {
                 let pct = p
                     .get("percent")
                     .and_then(serde_json::Value::as_f64)
@@ -425,8 +425,7 @@ async fn run_sidecar_download(
                     .and_then(serde_json::Value::as_u64)
                     .unwrap_or(0);
                 (pct, dl, tot)
-            })
-            .unwrap_or((0, 0, 0));
+            });
 
         match status.as_str() {
             "ready" => {

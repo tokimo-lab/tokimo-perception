@@ -85,7 +85,7 @@ fn pick_locale(prefs: &[String]) -> &'static LocaleBundle {
         }
         let lang = p.split(['-', '_']).next().unwrap_or("");
         if !lang.is_empty() {
-            for (tag, b) in map.iter() {
+            for (tag, b) in map {
                 if tag.starts_with(lang) {
                     return b;
                 }
@@ -139,7 +139,7 @@ pub async fn build_catalog(ai: &Arc<AiService>, req: &wire::CatalogRequest) -> w
 async fn build_ocr_section(ai: &Arc<AiService>, l: &LocaleBundle) -> wire::CatalogSection {
     let text = t_section(l, "ocr");
     let mut models = Vec::new();
-    for m in ai.ocr_available_models().into_iter() {
+    for m in ai.ocr_available_models() {
         let cat_id = format!("ocr.{}", m.id);
         let txt = t_model(l, &cat_id);
         let is_mobile = m.id == "pp-ocrv5-mobile";
@@ -356,9 +356,8 @@ pub enum ModelRoute {
 }
 
 pub fn route_for(model_id: &str) -> ModelRoute {
-    let (section, slug) = match model_id.split_once('.') {
-        Some(s) => s,
-        None => return ModelRoute::Unknown,
+    let Some((section, slug)) = model_id.split_once('.') else {
+        return ModelRoute::Unknown;
     };
     match section {
         "ocr" if slug == "pp-ocrv5-mobile" => ModelRoute::OcrMobile,

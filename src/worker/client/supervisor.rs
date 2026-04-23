@@ -167,10 +167,15 @@ impl Supervisor {
 
         st.child = Some(child);
         st.generation = st.generation.wrapping_add(1);
-        drop(st);
 
-        // Wait for the socket + /v1/ping to come up.
+        // Wait for the socket + /v1/ping to come up. MUST happen while still
+        // holding `st` — otherwise concurrent callers who acquire the lock
+        // between spawn and ready would see `child = Some(...)`, optimistically
+        // return Ok, and then try to connect to a socket that the worker
+        // hasn't bound yet (ENOENT). This race is how a queue burst of OCR
+        // jobs can lose ~all but the first when the worker is cold-starting.
         self.wait_ready().await?;
+        drop(st);
 
         *self.last_activity.lock() = Instant::now();
         Ok(())

@@ -299,7 +299,7 @@ async fn vlm_ocr_via_sidecar(sidecar_url: &str, model_name: &str, image_bytes: &
     let resp = client
         .post(&url)
         .json(&body)
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_mins(2))
         .send()
         .await
         .map_err(|e| format!("Sidecar HTTP error: {e}"))?;
@@ -385,7 +385,7 @@ async fn hybrid_ocr_via_sidecar(
     let resp = client
         .post(&url)
         .json(&body)
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_mins(3))
         .send()
         .await
         .map_err(|e| format!("Sidecar hybrid HTTP error: {e}"))?;

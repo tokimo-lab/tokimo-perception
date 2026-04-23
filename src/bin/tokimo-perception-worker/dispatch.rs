@@ -375,7 +375,7 @@ async fn run_sidecar_download(
             total_bytes: 0,
         }));
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60 * 30);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_mins(30);
     loop {
         if std::time::Instant::now() > deadline {
             return Err(RpcError::Internal(

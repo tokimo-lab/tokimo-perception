@@ -122,9 +122,9 @@ impl Drop for SidecarManager {
 
 /// Max time for the `uvicorn` process to bind its listening port and print the banner.
 /// First run may do `uv sync` which downloads GB-scale wheels — hence generous.
-const STARTUP_TIMEOUT: Duration = Duration::from_secs(600);
+const STARTUP_TIMEOUT: Duration = Duration::from_mins(10);
 /// Max time for `/health` to respond after startup banner.
-const HEALTH_TIMEOUT: Duration = Duration::from_secs(60);
+const HEALTH_TIMEOUT: Duration = Duration::from_mins(1);
 
 async fn spawn(python_dir: &PathBuf, models_dir: &str) -> Result<Running, String> {
     tracing::info!(

@@ -214,11 +214,7 @@ fn parse_scrfd_outputs(
         let num_anchors = score_shape[0] as usize;
         let feat_h = feat_size / stride;
         let feat_w = feat_size / stride;
-        let num_anchors_per_pos = if feat_h * feat_w > 0 {
-            num_anchors / (feat_h * feat_w)
-        } else {
-            2
-        };
+        let num_anchors_per_pos = num_anchors.checked_div(feat_h * feat_w).unwrap_or(2);
         let bbox_cols = bbox_shape[1] as usize;
 
         for idx in 0..num_anchors {

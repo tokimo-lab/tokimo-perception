@@ -68,7 +68,7 @@ use config::AiConfig;
 use tokio::sync::{OnceCell, RwLock};
 
 /// How long an idle model stays in memory before eviction.
-const MODEL_IDLE_TIMEOUT: Duration = Duration::from_secs(180); // 3 minutes
+const MODEL_IDLE_TIMEOUT: Duration = Duration::from_mins(3); // 3 minutes
 
 /// Max intra-op threads per ONNX Runtime session.
 /// Use half the logical CPUs (min 4, max 16) — sweet spot for parallel CPU inference.
@@ -76,8 +76,7 @@ const MODEL_IDLE_TIMEOUT: Duration = Duration::from_secs(180); // 3 minutes
 /// inference uses `tokio::sync::Mutex` + `run_async`.
 fn ort_intra_op_threads() -> usize {
     let cpus = std::thread::available_parallelism()
-        .map(std::num::NonZero::get)
-        .unwrap_or(4);
+        .map_or(4, std::num::NonZero::get);
     (cpus / 2).clamp(4, 16)
 }
 
@@ -248,8 +247,7 @@ fn gpu_device_present() -> bool {
             .arg("--query-gpu=name")
             .arg("--format=csv,noheader")
             .output()
-            .map(|o| o.status.success() && !o.stdout.is_empty())
-            .unwrap_or(false)
+            .is_ok_and(|o| o.status.success() && !o.stdout.is_empty())
 }
 
 /// Detect NVIDIA CUDA — Linux / Windows.
@@ -352,7 +350,7 @@ fn detect_best_ep() -> (AccelProvider, String) {
         if rocm.is_ok() {
             return (AccelProvider::ROCm, "ROCm".into());
         }
-        let reason = format!("CPU (CUDA: {}; ROCm: {})", cuda.unwrap_err(), rocm.unwrap_err(),);
+        let reason = format!("CPU (CUDA: {}; ROCm: {})", cuda.unwrap_err(), rocm.unwrap_err());
         return (AccelProvider::Cpu, reason);
     }
 

@@ -29,6 +29,7 @@
 //! `Vec<Weak<RunOptions>>` per id; `cancel_inflight` terminates all of them.
 
 use std::sync::{Arc, LazyLock, Weak};
+use std::time::Instant;
 
 use dashmap::DashMap;
 use ort::session::{NoSelectedOutputs, RunOptions};
@@ -42,6 +43,17 @@ tokio::task_local! {
 type OptRef = Weak<RunOptions<NoSelectedOutputs>>;
 
 static REGISTRY: LazyLock<DashMap<String, Vec<OptRef>>> = LazyLock::new(DashMap::new);
+
+/// Records cancel intent for ids that may not have a live RunOptions yet
+/// (pre-session / between-session windows). Entries are GC'd inline by
+/// `cancel_inflight` after 120 s.
+static CANCELLED: LazyLock<DashMap<String, Instant>> = LazyLock::new(DashMap::new);
+
+/// Returns `true` if a cancel intent was recorded for `id` (regardless of
+/// whether any `RunOptions` is currently registered).
+pub fn is_cancelled(id: &str) -> bool {
+    CANCELLED.contains_key(id)
+}
 
 /// RAII guard: while held, the paired `RunOptions` is reachable from
 /// [`cancel_inflight`]. On drop, it is removed from the registry.
@@ -86,7 +98,19 @@ pub fn register_current(options: &Arc<RunOptions<NoSelectedOutputs>>) -> Option<
 /// `true` if at least one live entry was terminated. This is safe to call from
 /// any thread and does not block waiting for inference to exit — ORT will
 /// notice the flag at its next cancellation point.
+///
+/// Also records the cancel intent in `CANCELLED` so that pre-session checks
+/// via [`is_cancelled`] can bail out even between ORT sessions. Inline GC
+/// removes `CANCELLED` entries older than 120 s to bound memory growth.
 pub fn cancel_inflight(id: &str) -> bool {
+    // Inline GC: remove stale CANCELLED entries (>120 s old).
+    let gc_threshold = std::time::Duration::from_mins(2);
+    CANCELLED.retain(|_, ts| ts.elapsed() < gc_threshold);
+
+    // Record cancel intent before querying REGISTRY so pre-session checks
+    // that run right after this call will observe it.
+    CANCELLED.insert(id.to_string(), Instant::now());
+
     let Some(entry) = REGISTRY.get(id) else {
         return false;
     };

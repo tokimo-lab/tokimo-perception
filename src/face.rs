@@ -99,6 +99,16 @@ impl FaceService {
 
         let input_tensor = Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
         let options = Arc::new(ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?);
+        // Bail early if cancel arrived before this session started.
+        if crate::cancel::CANCEL_ID
+            .try_with(Clone::clone)
+            .ok()
+            .flatten()
+            .as_deref()
+            .is_some_and(crate::cancel::is_cancelled)
+        {
+            return Err("cancelled before inference".into());
+        }
         let _cancel_guard = crate::cancel::register_current(&options);
         let faces = {
             let mut session = self.det_session.lock().await;
@@ -147,6 +157,16 @@ impl FaceService {
 
         let input_tensor = Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
         let options = Arc::new(ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?);
+        // Bail early if cancel arrived before this session started.
+        if crate::cancel::CANCEL_ID
+            .try_with(Clone::clone)
+            .ok()
+            .flatten()
+            .as_deref()
+            .is_some_and(crate::cancel::is_cancelled)
+        {
+            return Err("cancelled before inference".into());
+        }
         let _cancel_guard = crate::cancel::register_current(&options);
         let raw: Vec<f32> = {
             let mut session = self.rec_session.lock().await;

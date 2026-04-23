@@ -62,6 +62,8 @@ pub struct Supervisor {
     transport: Arc<AnyTransport>,
     state: AsyncMutex<SpawnState>,
     last_activity: Mutex<Instant>,
+    /// Debounce: tracks the last time kill_and_respawn successfully killed the child.
+    last_kill_at: Mutex<Option<Instant>>,
 }
 
 struct SpawnState {
@@ -80,6 +82,7 @@ impl Supervisor {
                 generation: 0,
             }),
             last_activity: Mutex::new(Instant::now()),
+            last_kill_at: Mutex::new(None),
         });
         sup.spawn_idle_watchdog();
         sup
@@ -194,6 +197,35 @@ impl Supervisor {
             tokio::time::sleep(delay).await;
             delay = (delay * 2).min(Duration::from_secs(1));
         }
+    }
+
+    /// Hard-kill the current worker child and let the next RPC respawn it.
+    /// Used as a last-resort escalation when cooperative cancel didn't stop
+    /// the in-flight inference in time. Debounced to 2 s — rapid successive
+    /// calls collapse into one kill.
+    pub async fn kill_and_respawn(self: &Arc<Self>) -> RpcResult<()> {
+        if self.cfg.remote {
+            return Ok(());
+        }
+        // Debounce: skip if we already killed within the last 2 s.
+        {
+            let last = self.last_kill_at.lock();
+            if last.is_some_and(|t: Instant| t.elapsed() < Duration::from_secs(2)) {
+                return Ok(());
+            }
+        }
+        *self.last_kill_at.lock() = Some(Instant::now());
+
+        let mut st = self.state.lock().await;
+        if let Some(mut child) = st.child.take() {
+            tracing::warn!("ai-worker: hard-killing child (cancel escalation)");
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+        }
+        st.generation = st.generation.wrapping_add(1);
+        drop(st);
+        // The next RPC will trigger ensure_up() → respawn.
+        Ok(())
     }
 
     fn spawn_idle_watchdog(self: &Arc<Self>) {

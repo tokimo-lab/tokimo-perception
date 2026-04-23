@@ -112,6 +112,16 @@ impl OcrDetector {
 
         let input_tensor = Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
         let options = Arc::new(ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?);
+        // Bail early if cancel arrived before this session started.
+        if crate::cancel::CANCEL_ID
+            .try_with(Clone::clone)
+            .ok()
+            .flatten()
+            .as_deref()
+            .is_some_and(crate::cancel::is_cancelled)
+        {
+            return Err("cancelled before inference".into());
+        }
         let _cancel_guard = crate::cancel::register_current(&options);
         let prob_data: Vec<f32> = {
             let mut session = self.det_session.lock().await;
@@ -187,6 +197,16 @@ impl OcrDetector {
 
         let input_tensor = Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
         let options = Arc::new(ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?);
+        // Bail early if cancel arrived before this session started.
+        if crate::cancel::CANCEL_ID
+            .try_with(Clone::clone)
+            .ok()
+            .flatten()
+            .as_deref()
+            .is_some_and(crate::cancel::is_cancelled)
+        {
+            return Err("cancelled before inference".into());
+        }
         let _cancel_guard = crate::cancel::register_current(&options);
         let is_flipped: bool = {
             let mut session = self.cls_session.lock().await;

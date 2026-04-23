@@ -277,6 +277,17 @@ impl AiWorkerClient {
         Ok(res.cancelled)
     }
 
+    /// Hard-kill the worker process. Used as a last-resort escalation when
+    /// cooperative cancel hasn't stopped in-flight inference after 5 s.
+    /// The next inference RPC will transparently respawn the worker.
+    /// No-op in Remote mode (no supervisor available).
+    pub async fn kill_worker(&self) -> ClientResult<()> {
+        if let Some(sv) = &self.supervisor {
+            sv.kill_and_respawn().await.map_err(rpc_to_string)?;
+        }
+        Ok(())
+    }
+
     // ---------------- STT (one-shot) ----------------
 
     pub async fn transcribe_audio(&self, wav: Vec<u8>) -> ClientResult<String> {

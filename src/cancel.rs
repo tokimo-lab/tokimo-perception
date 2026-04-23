@@ -92,10 +92,10 @@ pub fn cancel_inflight(id: &str) -> bool {
     };
     let mut any = false;
     for weak in entry.iter() {
-        if let Some(opts) = weak.upgrade() {
-            if opts.terminate().is_ok() {
-                any = true;
-            }
+        if let Some(opts) = weak.upgrade()
+            && opts.terminate().is_ok()
+        {
+            any = true;
         }
     }
     any

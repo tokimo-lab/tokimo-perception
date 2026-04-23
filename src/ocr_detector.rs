@@ -3,6 +3,8 @@
 /// Extracted from `OcrService` so that both CTC-based (`OcrService`) and
 /// Attention-based (`OcrAttentionService`) recognisers can share the same
 /// expensive detection + classification ONNX sessions.
+use std::sync::Arc;
+
 use tokio::sync::Mutex;
 
 use image::{DynamicImage, GrayImage, Luma};
@@ -109,11 +111,12 @@ impl OcrDetector {
         }
 
         let input_tensor = Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
-        let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let options = Arc::new(ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?);
+        let _cancel_guard = crate::cancel::register_current(&options);
         let prob_data: Vec<f32> = {
             let mut session = self.det_session.lock().await;
             let outputs = session
-                .run_async(ort::inputs![input_tensor], &options)
+                .run_async(ort::inputs![input_tensor], &*options)
                 .map_err(|e| format!("Detection run_async: {e}"))?
                 .await
                 .map_err(|e| format!("Detection inference: {e}"))?;
@@ -183,11 +186,12 @@ impl OcrDetector {
         }
 
         let input_tensor = Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
-        let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let options = Arc::new(ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?);
+        let _cancel_guard = crate::cancel::register_current(&options);
         let is_flipped: bool = {
             let mut session = self.cls_session.lock().await;
             let outputs = session
-                .run_async(ort::inputs![input_tensor], &options)
+                .run_async(ort::inputs![input_tensor], &*options)
                 .map_err(|e| format!("Classification run_async: {e}"))?
                 .await
                 .map_err(|e| format!("Classification inference: {e}"))?;

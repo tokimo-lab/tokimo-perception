@@ -44,4 +44,7 @@ pub mod routes {
     pub const STT_TRANSCRIBE: &str = "/v1/stt/transcribe";
     pub const STT_TRANSCRIBE_PCM: &str = "/v1/stt/transcribe_pcm";
     pub const STT_STREAM: &str = "/v1/stt/stream"; // bidirectional
+
+    /// Terminate in-flight ORT inference(s) registered under the given id.
+    pub const CANCEL: &str = "/v1/cancel";
 }

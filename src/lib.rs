@@ -6,6 +6,7 @@
 
 pub mod clip;
 pub mod clip_categories;
+pub mod cancel;
 pub mod config;
 pub mod face;
 pub mod models;
@@ -635,7 +636,12 @@ impl AiService {
     ///
     /// `model_name` selects the backend (e.g. `"rapid-ocr-rust"`).
     /// Pass `None` to use the default server model.
-    pub async fn ocr(&self, image_bytes: &[u8], model_name: Option<&str>) -> Result<Vec<ocr::OcrItem>, String> {
+    pub async fn ocr(
+        &self,
+        image_bytes: &[u8],
+        model_name: Option<&str>,
+        cancel_id: Option<&str>,
+    ) -> Result<Vec<ocr::OcrItem>, String> {
         if !self.config.enable_ocr {
             return Err("OCR is disabled".into());
         }
@@ -650,7 +656,7 @@ impl AiService {
             })
             .await?;
         let model = model_name.unwrap_or(ocr_manager::DEFAULT_MODEL);
-        manager.ocr(model, image_bytes).await
+        cancel::with_cancel_id(cancel_id, manager.ocr(model, image_bytes)).await
     }
 
     /// Hybrid OCR: `det_model` provides bounding boxes, `vlm_model` provides
@@ -661,6 +667,7 @@ impl AiService {
         image_bytes: &[u8],
         det_model: &str,
         vlm_model: &str,
+        cancel_id: Option<&str>,
     ) -> Result<(Vec<ocr::OcrItem>, Option<serde_json::Value>), String> {
         if !self.config.enable_ocr {
             return Err("OCR is disabled".into());
@@ -675,7 +682,11 @@ impl AiService {
                 ))
             })
             .await?;
-        manager.ocr_hybrid(det_model, vlm_model, image_bytes).await
+        cancel::with_cancel_id(
+            cancel_id,
+            manager.ocr_hybrid(det_model, vlm_model, image_bytes),
+        )
+        .await
     }
 
     /// List available OCR models and their status.
@@ -689,22 +700,30 @@ impl AiService {
     // ── CLIP ─────────────────────────────────────────────────────────────
 
     /// Embed an image → 512-dim CLIP vector.
-    pub async fn clip_image(&self, image_bytes: &[u8]) -> Result<Vec<f32>, String> {
+    pub async fn clip_image(
+        &self,
+        image_bytes: &[u8],
+        cancel_id: Option<&str>,
+    ) -> Result<Vec<f32>, String> {
         if !self.config.enable_clip {
             return Err("CLIP is disabled".into());
         }
         let img = image::load_from_memory(image_bytes).map_err(|e| format!("Invalid image: {e}"))?;
         let svc = self.get_or_init_clip().await?;
-        svc.embed_image(&img).await
+        cancel::with_cancel_id(cancel_id, svc.embed_image(&img)).await
     }
 
     /// Embed text → 512-dim CLIP vector.
-    pub async fn clip_text(&self, text: &str) -> Result<Vec<f32>, String> {
+    pub async fn clip_text(
+        &self,
+        text: &str,
+        cancel_id: Option<&str>,
+    ) -> Result<Vec<f32>, String> {
         if !self.config.enable_clip {
             return Err("CLIP is disabled".into());
         }
         let svc = self.get_or_init_clip().await?;
-        svc.embed_text(text).await
+        cancel::with_cancel_id(cancel_id, svc.embed_text(text)).await
     }
 
     /// Classify an image vector against the built-in taxonomy using CLIP zero-shot.
@@ -741,13 +760,17 @@ impl AiService {
     // ── Face ─────────────────────────────────────────────────────────────
 
     /// Detect faces and extract 512-dim embeddings.
-    pub async fn detect_faces(&self, image_bytes: &[u8]) -> Result<Vec<face::FaceDetection>, String> {
+    pub async fn detect_faces(
+        &self,
+        image_bytes: &[u8],
+        cancel_id: Option<&str>,
+    ) -> Result<Vec<face::FaceDetection>, String> {
         if !self.config.enable_face {
             return Err("Face recognition is disabled".into());
         }
         let img = image::load_from_memory(image_bytes).map_err(|e| format!("Invalid image: {e}"))?;
         let svc = self.get_or_init_face().await?;
-        svc.detect_faces(&img).await
+        cancel::with_cancel_id(cancel_id, svc.detect_faces(&img)).await
     }
 
     async fn get_or_init_face(&self) -> Result<Arc<face::FaceService>, String> {

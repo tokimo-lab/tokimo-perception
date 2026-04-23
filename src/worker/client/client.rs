@@ -172,10 +172,22 @@ impl AiWorkerClient {
 
     // ---------------- OCR ----------------
 
-    pub async fn ocr(&self, image: Vec<u8>, model: Option<String>) -> ClientResult<Vec<wire::OcrItem>> {
-        self.call::<_, Vec<wire::OcrItem>>(routes::OCR, &wire::OcrRequest { image, model })
-            .await
-            .map_err(rpc_to_string)
+    pub async fn ocr(
+        &self,
+        image: Vec<u8>,
+        model: Option<String>,
+        request_id: Option<String>,
+    ) -> ClientResult<Vec<wire::OcrItem>> {
+        self.call::<_, Vec<wire::OcrItem>>(
+            routes::OCR,
+            &wire::OcrRequest {
+                image,
+                model,
+                request_id,
+            },
+        )
+        .await
+        .map_err(rpc_to_string)
     }
 
     pub async fn ocr_hybrid(
@@ -183,6 +195,7 @@ impl AiWorkerClient {
         image: Vec<u8>,
         det_model: Option<String>,
         vlm_model: Option<String>,
+        request_id: Option<String>,
     ) -> ClientResult<Vec<wire::OcrItem>> {
         self.call::<_, Vec<wire::OcrItem>>(
             routes::OCR_HYBRID,
@@ -190,6 +203,7 @@ impl AiWorkerClient {
                 image,
                 det_model,
                 vlm_model,
+                request_id,
             },
         )
         .await
@@ -204,16 +218,30 @@ impl AiWorkerClient {
 
     // ---------------- CLIP ----------------
 
-    pub async fn clip_image(&self, image: Vec<u8>) -> ClientResult<Vec<f32>> {
-        self.call::<_, Vec<f32>>(routes::CLIP_IMAGE, &wire::ClipImageRequest { image })
-            .await
-            .map_err(rpc_to_string)
+    pub async fn clip_image(
+        &self,
+        image: Vec<u8>,
+        request_id: Option<String>,
+    ) -> ClientResult<Vec<f32>> {
+        self.call::<_, Vec<f32>>(
+            routes::CLIP_IMAGE,
+            &wire::ClipImageRequest { image, request_id },
+        )
+        .await
+        .map_err(rpc_to_string)
     }
 
-    pub async fn clip_text(&self, text: String) -> ClientResult<Vec<f32>> {
-        self.call::<_, Vec<f32>>(routes::CLIP_TEXT, &wire::ClipTextRequest { text })
-            .await
-            .map_err(rpc_to_string)
+    pub async fn clip_text(
+        &self,
+        text: String,
+        request_id: Option<String>,
+    ) -> ClientResult<Vec<f32>> {
+        self.call::<_, Vec<f32>>(
+            routes::CLIP_TEXT,
+            &wire::ClipTextRequest { text, request_id },
+        )
+        .await
+        .map_err(rpc_to_string)
     }
 
     pub async fn clip_classify(&self, vector: Vec<f32>) -> ClientResult<Vec<wire::TagResult>> {
@@ -224,10 +252,29 @@ impl AiWorkerClient {
 
     // ---------------- Face ----------------
 
-    pub async fn detect_faces(&self, image: Vec<u8>) -> ClientResult<Vec<wire::FaceDetection>> {
-        self.call::<_, Vec<wire::FaceDetection>>(routes::FACE_DETECT, &wire::FaceRequest { image })
+    pub async fn detect_faces(
+        &self,
+        image: Vec<u8>,
+        request_id: Option<String>,
+    ) -> ClientResult<Vec<wire::FaceDetection>> {
+        self.call::<_, Vec<wire::FaceDetection>>(
+            routes::FACE_DETECT,
+            &wire::FaceRequest { image, request_id },
+        )
+        .await
+        .map_err(rpc_to_string)
+    }
+
+    // ---------------- Cancel ----------------
+
+    /// Terminate any in-flight ORT inference(s) registered under `request_id`.
+    /// Returns `true` if at least one live inference was terminated.
+    pub async fn cancel(&self, request_id: String) -> ClientResult<bool> {
+        let res: wire::CancelResponse = self
+            .call(routes::CANCEL, &wire::CancelRequest { request_id })
             .await
-            .map_err(rpc_to_string)
+            .map_err(rpc_to_string)?;
+        Ok(res.cancelled)
     }
 
     // ---------------- STT (one-shot) ----------------

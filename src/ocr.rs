@@ -6,6 +6,8 @@
 /// is retained below but currently unused — no production-ready attention ONNX model
 /// exists yet. When one becomes available, re-enable by loading `attn_rec_session`
 /// and routing through `recognize_text_attention` in `recognize_text`.
+use std::sync::Arc;
+
 use tokio::sync::Mutex;
 
 use image::DynamicImage;
@@ -193,11 +195,12 @@ impl OcrService {
         }
 
         let batch_tensor = Tensor::from_array(batch).map_err(|e| format!("Batch tensor: {e}"))?;
-        let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let options = Arc::new(ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?);
+        let _cancel_guard = crate::cancel::register_current(&options);
         let rec_array: ndarray::ArrayD<f32> = {
             let mut session = self.rec_session.lock().await;
             let outputs = session
-                .run_async(ort::inputs![batch_tensor], &options)
+                .run_async(ort::inputs![batch_tensor], &*options)
                 .map_err(|e| format!("Recognition run_async: {e}"))?
                 .await
                 .map_err(|e| format!("Recognition inference: {e}"))?;
@@ -238,11 +241,12 @@ impl OcrService {
         };
 
         let input_tensor = Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
-        let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let options = Arc::new(ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?);
+        let _cancel_guard = crate::cancel::register_current(&options);
         let rec_array: ndarray::ArrayD<f32> = {
             let mut session = self.rec_session.lock().await;
             let outputs = session
-                .run_async(ort::inputs![input_tensor], &options)
+                .run_async(ort::inputs![input_tensor], &*options)
                 .map_err(|e| format!("Recognition run_async: {e}"))?
                 .await
                 .map_err(|e| format!("Recognition inference: {e}"))?;

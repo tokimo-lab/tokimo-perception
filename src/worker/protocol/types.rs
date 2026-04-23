@@ -96,6 +96,11 @@ pub struct OcrRequest {
     pub image: Vec<u8>,
     /// Model id override (None = use configured default).
     pub model: Option<String>,
+    /// Optional cancellation id — when set, ORT `run_async` sites register
+    /// their `RunOptions` under this id so the server can terminate in-flight
+    /// inference via the `/v1/cancel` route.
+    #[serde(default)]
+    pub request_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +109,8 @@ pub struct OcrHybridRequest {
     pub image: Vec<u8>,
     pub det_model: Option<String>,
     pub vlm_model: Option<String>,
+    #[serde(default)]
+    pub request_id: Option<String>,
 }
 
 // serde_bytes crate provides #[serde(with = "serde_bytes")] for Vec<u8>.
@@ -114,11 +121,15 @@ pub struct OcrHybridRequest {
 pub struct ClipImageRequest {
     #[serde(with = "serde_bytes")]
     pub image: Vec<u8>,
+    #[serde(default)]
+    pub request_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClipTextRequest {
     pub text: String,
+    #[serde(default)]
+    pub request_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,6 +151,8 @@ pub struct TagResult {
 pub struct FaceRequest {
     #[serde(with = "serde_bytes")]
     pub image: Vec<u8>,
+    #[serde(default)]
+    pub request_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -367,4 +380,18 @@ pub fn int16_bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
             f32::from(sample) / 32768.0
         })
         .collect()
+}
+
+// ---------- Cancel ----------
+
+/// Request to terminate all in-flight ORT inference associated with a given id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CancelRequest {
+    pub request_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CancelResponse {
+    /// True if at least one in-flight RunOptions was terminated.
+    pub cancelled: bool,
 }

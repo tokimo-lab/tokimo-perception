@@ -98,7 +98,7 @@ async fn unary_inner(ai: &Arc<AiService>, route: &str, req_bytes: &[u8]) -> RpcR
         routes::OCR => {
             let req: wire::OcrRequest = decode(req_bytes)?;
             let out = ai
-                .ocr(&req.image, req.model.as_deref())
+                .ocr(&req.image, req.model.as_deref(), req.request_id.as_deref())
                 .await
                 .map_err(map_err)?;
             let items: Vec<_> = out.into_iter().map(convert::ocr_item_to_wire).collect();
@@ -114,18 +114,27 @@ async fn unary_inner(ai: &Arc<AiService>, route: &str, req_bytes: &[u8]) -> RpcR
                 .vlm_model
                 .as_deref()
                 .ok_or_else(|| RpcError::BadRequest("vlm_model required".into()))?;
-            let (items, _debug) = ai.ocr_hybrid(&req.image, det, vlm).await.map_err(map_err)?;
+            let (items, _debug) = ai
+                .ocr_hybrid(&req.image, det, vlm, req.request_id.as_deref())
+                .await
+                .map_err(map_err)?;
             let items: Vec<_> = items.into_iter().map(convert::ocr_item_to_wire).collect();
             encode::<RpcResult<Vec<wire::OcrItem>>>(&Ok(items))
         }
         routes::CLIP_IMAGE => {
             let req: wire::ClipImageRequest = decode(req_bytes)?;
-            let v = ai.clip_image(&req.image).await.map_err(map_err)?;
+            let v = ai
+                .clip_image(&req.image, req.request_id.as_deref())
+                .await
+                .map_err(map_err)?;
             encode::<RpcResult<Vec<f32>>>(&Ok(v))
         }
         routes::CLIP_TEXT => {
             let req: wire::ClipTextRequest = decode(req_bytes)?;
-            let v = ai.clip_text(&req.text).await.map_err(map_err)?;
+            let v = ai
+                .clip_text(&req.text, req.request_id.as_deref())
+                .await
+                .map_err(map_err)?;
             encode::<RpcResult<Vec<f32>>>(&Ok(v))
         }
         routes::CLIP_CLASSIFY => {
@@ -136,9 +145,17 @@ async fn unary_inner(ai: &Arc<AiService>, route: &str, req_bytes: &[u8]) -> RpcR
         }
         routes::FACE_DETECT => {
             let req: wire::FaceRequest = decode(req_bytes)?;
-            let out = ai.detect_faces(&req.image).await.map_err(map_err)?;
+            let out = ai
+                .detect_faces(&req.image, req.request_id.as_deref())
+                .await
+                .map_err(map_err)?;
             let faces: Vec<_> = out.into_iter().map(convert::face_to_wire).collect();
             encode::<RpcResult<Vec<wire::FaceDetection>>>(&Ok(faces))
+        }
+        routes::CANCEL => {
+            let req: wire::CancelRequest = decode(req_bytes)?;
+            let cancelled = tokimo_perception::cancel::cancel_inflight(&req.request_id);
+            encode::<RpcResult<wire::CancelResponse>>(&Ok(wire::CancelResponse { cancelled }))
         }
         routes::STT_TRANSCRIBE => {
             let req: wire::SttTranscribeRequest = decode(req_bytes)?;

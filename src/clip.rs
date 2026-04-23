@@ -2,6 +2,7 @@
 /// Image → 512-dim vector, Text → 512-dim vector.
 /// Also provides zero-shot classification via `clip_categories` taxonomy.
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use tokio::sync::Mutex;
 
@@ -84,12 +85,13 @@ impl ClipService {
     pub async fn embed_image(&self, img: &DynamicImage) -> Result<Vec<f32>, String> {
         let input = preprocess_image(img);
         let input_tensor = Tensor::from_array(input).map_err(|e| format!("Create tensor: {e}"))?;
-        let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let options = Arc::new(ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?);
+        let _cancel_guard = crate::cancel::register_current(&options);
 
         let data: Vec<f32> = {
             let mut session = self.img_session.lock().await;
             let outputs = session
-                .run_async(ort::inputs![input_tensor], &options)
+                .run_async(ort::inputs![input_tensor], &*options)
                 .map_err(|e| format!("CLIP img run_async: {e}"))?
                 .await
                 .map_err(|e| format!("CLIP img inference: {e}"))?;
@@ -107,12 +109,13 @@ impl ClipService {
         let token_ids = self.tokenizer.encode(text, CONTEXT_LENGTH);
         let input_tensor = Tensor::from_array(([1i64, CONTEXT_LENGTH as i64], token_ids))
             .map_err(|e| format!("Create tensor: {e}"))?;
-        let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let options = Arc::new(ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?);
+        let _cancel_guard = crate::cancel::register_current(&options);
 
         let data: Vec<f32> = {
             let mut session = self.txt_session.lock().await;
             let outputs = session
-                .run_async(ort::inputs![input_tensor], &options)
+                .run_async(ort::inputs![input_tensor], &*options)
                 .map_err(|e| format!("CLIP txt run_async: {e}"))?
                 .await
                 .map_err(|e| format!("CLIP txt inference: {e}"))?;

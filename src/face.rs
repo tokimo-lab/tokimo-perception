@@ -2,6 +2,7 @@
 /// SCRFD (`det_10g`) for detection + `ArcFace` (`w600k_r50`) for recognition.
 /// Produces 512-dim face embeddings.
 use std::path::Path;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use image::DynamicImage;
@@ -97,11 +98,12 @@ impl FaceService {
         }
 
         let input_tensor = Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
-        let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let options = Arc::new(ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?);
+        let _cancel_guard = crate::cancel::register_current(&options);
         let faces = {
             let mut session = self.det_session.lock().await;
             let outputs = session
-                .run_async(ort::inputs![input_tensor], &options)
+                .run_async(ort::inputs![input_tensor], &*options)
                 .map_err(|e| format!("Face det run_async: {e}"))?
                 .await
                 .map_err(|e| format!("Face detection inference: {e}"))?;
@@ -144,11 +146,12 @@ impl FaceService {
         }
 
         let input_tensor = Tensor::from_array(tensor).map_err(|e| format!("Create tensor: {e}"))?;
-        let options = ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?;
+        let options = Arc::new(ort::session::RunOptions::new().map_err(|e| format!("RunOptions: {e}"))?);
+        let _cancel_guard = crate::cancel::register_current(&options);
         let raw: Vec<f32> = {
             let mut session = self.rec_session.lock().await;
             let outputs = session
-                .run_async(ort::inputs![input_tensor], &options)
+                .run_async(ort::inputs![input_tensor], &*options)
                 .map_err(|e| format!("Face rec run_async: {e}"))?
                 .await
                 .map_err(|e| format!("Face rec inference: {e}"))?;

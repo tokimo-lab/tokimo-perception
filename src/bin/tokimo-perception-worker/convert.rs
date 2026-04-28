@@ -1,7 +1,7 @@
 //! Convert between tokimo-perception' native types and ai-worker-protocol wire types.
 
-use tokimo_perception::worker::protocol::types as wire;
 use tokimo_perception as rm;
+use tokimo_perception::worker::protocol::types as wire;
 
 pub fn accel_to_wire(p: rm::AccelProvider) -> wire::AccelProvider {
     match p {

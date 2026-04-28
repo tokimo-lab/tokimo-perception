@@ -17,8 +17,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use tokimo_perception::{AiService, config::AiConfig};
 use supervisor::WorkerSignal;
+use tokimo_perception::{AiService, config::AiConfig};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
@@ -117,8 +117,9 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         let deadline = idle_exit.map(|d| last_activity + d);
-        let sleep_for = deadline
-            .map_or(Duration::from_mins(1), |dl| dl.saturating_duration_since(Instant::now()));
+        let sleep_for = deadline.map_or(Duration::from_mins(1), |dl| {
+            dl.saturating_duration_since(Instant::now())
+        });
         tokio::select! {
             Some(sig) = sig_rx.recv() => match sig {
                 WorkerSignal::Activity => last_activity = Instant::now(),

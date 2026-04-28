@@ -5,11 +5,11 @@
 
 use std::sync::Arc;
 
+use serde::Serialize;
+use tokimo_perception::AiService;
 use tokimo_perception::worker::protocol::error::{RpcError, RpcResult};
 use tokimo_perception::worker::protocol::routes;
 use tokimo_perception::worker::protocol::types as wire;
-use tokimo_perception::AiService;
-use serde::Serialize;
 use tokio::sync::mpsc;
 
 use crate::catalog;
@@ -164,10 +164,7 @@ async fn unary_inner(ai: &Arc<AiService>, route: &str, req_bytes: &[u8]) -> RpcR
         }
         routes::STT_TRANSCRIBE_PCM => {
             let req: wire::SttTranscribePcmRequest = decode(req_bytes)?;
-            let text = ai
-                .transcribe_pcm(req.samples, req.sample_rate)
-                .await
-                .map_err(map_err)?;
+            let text = ai.transcribe_pcm(req.samples, req.sample_rate).await.map_err(map_err)?;
             encode::<RpcResult<wire::SttTranscribeResponse>>(&Ok(wire::SttTranscribeResponse { text }))
         }
         routes::SHUTDOWN => {
@@ -273,21 +270,22 @@ async fn server_stream_inner(
             let route = catalog::route_for(&model_id);
             tracing::debug!(%model_id, "worker: MODEL_DOWNLOAD entered");
             let tx_cat = tx.clone();
-            let progress_native: tokimo_perception::models::ProgressFn = Box::new(move |file, status, pct, dl, total| {
-                // Pass the real per-file name so the rust-server side can
-                // aggregate multi-file downloads (e.g. RapidOCR = det + rec)
-                // into a single monotonic progress bar. Collapsing all files
-                // into one key would make the bar reset each time a new file
-                // starts.
-                let frame = wire::ProgressFrame::Progress {
-                    file_name: file.to_string(),
-                    status: status.to_string(),
-                    percent: u32::from(pct),
-                    downloaded_bytes: dl,
-                    total_bytes: total,
-                };
-                let _ = tx_cat.try_send(Ok(frame));
-            });
+            let progress_native: tokimo_perception::models::ProgressFn =
+                Box::new(move |file, status, pct, dl, total| {
+                    // Pass the real per-file name so the rust-server side can
+                    // aggregate multi-file downloads (e.g. RapidOCR = det + rec)
+                    // into a single monotonic progress bar. Collapsing all files
+                    // into one key would make the bar reset each time a new file
+                    // starts.
+                    let frame = wire::ProgressFrame::Progress {
+                        file_name: file.to_string(),
+                        status: status.to_string(),
+                        percent: u32::from(pct),
+                        downloaded_bytes: dl,
+                        total_bytes: total,
+                    };
+                    let _ = tx_cat.try_send(Ok(frame));
+                });
             match route {
                 catalog::ModelRoute::OcrServer => {
                     ai.ensure_category_with_progress(
@@ -306,20 +304,14 @@ async fn server_stream_inner(
                     .map_err(map_err)?;
                 }
                 catalog::ModelRoute::Clip => {
-                    ai.ensure_category_with_progress(
-                        tokimo_perception::models::ModelCategory::Clip,
-                        progress_native,
-                    )
-                    .await
-                    .map_err(map_err)?;
+                    ai.ensure_category_with_progress(tokimo_perception::models::ModelCategory::Clip, progress_native)
+                        .await
+                        .map_err(map_err)?;
                 }
                 catalog::ModelRoute::Face => {
-                    ai.ensure_category_with_progress(
-                        tokimo_perception::models::ModelCategory::Face,
-                        progress_native,
-                    )
-                    .await
-                    .map_err(map_err)?;
+                    ai.ensure_category_with_progress(tokimo_perception::models::ModelCategory::Face, progress_native)
+                        .await
+                        .map_err(map_err)?;
                 }
                 catalog::ModelRoute::Stt(slug) => {
                     let tx_stt = tx.clone();
@@ -383,21 +375,18 @@ async fn run_sidecar_download(
     }
 
     // Emit initial "downloading 0%" so the aggregator flips state immediately
-    let _ = tx
-        .try_send(Ok(wire::ProgressFrame::Progress {
-            file_name: model_id.to_string(),
-            status: "downloading".into(),
-            percent: 0,
-            downloaded_bytes: 0,
-            total_bytes: 0,
-        }));
+    let _ = tx.try_send(Ok(wire::ProgressFrame::Progress {
+        file_name: model_id.to_string(),
+        status: "downloading".into(),
+        percent: 0,
+        downloaded_bytes: 0,
+        total_bytes: 0,
+    }));
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_mins(30);
     loop {
         if std::time::Instant::now() > deadline {
-            return Err(RpcError::Internal(
-                "sidecar download timed out after 30 minutes".into(),
-            ));
+            return Err(RpcError::Internal("sidecar download timed out after 30 minutes".into()));
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
@@ -420,29 +409,20 @@ async fn run_sidecar_download(
         else {
             continue;
         };
-        let status = model
-            .get("status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let (percent, downloaded, total) = model
-            .get("progress")
-            .map_or((0, 0, 0), |p| {
-                let pct = p
-                    .get("percent")
-                    .and_then(serde_json::Value::as_f64)
-                    .unwrap_or(0.0)
-                    .clamp(0.0, 100.0) as u32;
-                let dl = p
-                    .get("downloaded_bytes")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0);
-                let tot = p
-                    .get("total_bytes")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0);
-                (pct, dl, tot)
-            });
+        let status = model.get("status").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let (percent, downloaded, total) = model.get("progress").map_or((0, 0, 0), |p| {
+            let pct = p
+                .get("percent")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0)
+                .clamp(0.0, 100.0) as u32;
+            let dl = p
+                .get("downloaded_bytes")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            let tot = p.get("total_bytes").and_then(serde_json::Value::as_u64).unwrap_or(0);
+            (pct, dl, tot)
+        });
 
         match status.as_str() {
             "ready" => {

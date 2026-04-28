@@ -128,8 +128,7 @@ async fn download_category(
     // start. Best-effort: if HEAD fails we skip the announce and the download
     // still works (bar just starts without a known total for that file).
     if let Some(cb) = on_progress.as_ref() {
-        let mut announced_zips: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut announced_zips: std::collections::HashSet<String> = std::collections::HashSet::new();
         for f in MODEL_FILES {
             if f.category != category {
                 continue;

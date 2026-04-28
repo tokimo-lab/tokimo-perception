@@ -7,16 +7,16 @@
 
 use std::sync::Arc;
 
-use tokimo_perception::worker::protocol::routes;
-use tokimo_perception::worker::protocol::types as wire;
+use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Path as AxPath, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::Router;
 use tokimo_perception::AiService;
+use tokimo_perception::worker::protocol::routes;
+use tokimo_perception::worker::protocol::types as wire;
 use tokio::sync::mpsc;
 use tokio_util::io::ReaderStream;
 
@@ -37,11 +37,7 @@ pub fn router(ai: Arc<AiService>, sig: mpsc::Sender<WorkerSignal>) -> Router {
         .with_state(st)
 }
 
-async fn handle_unary_or_stream(
-    State(st): State<HttpState>,
-    AxPath(route): AxPath<String>,
-    body: Bytes,
-) -> Response {
+async fn handle_unary_or_stream(State(st): State<HttpState>, AxPath(route): AxPath<String>, body: Bytes) -> Response {
     let full_route = format!("/v1/{route}");
     let _ = st.sig.send(WorkerSignal::Activity).await;
 

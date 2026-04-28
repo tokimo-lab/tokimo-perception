@@ -115,8 +115,7 @@ pub async fn read_header<R: AsyncRead + Unpin>(r: &mut R) -> RpcResult<(String, 
             return Err(RpcError::Transport("header too long".into()));
         }
     }
-    let line = std::str::from_utf8(&line)
-        .map_err(|e| RpcError::Transport(format!("header not utf8: {e}")))?;
+    let line = std::str::from_utf8(&line).map_err(|e| RpcError::Transport(format!("header not utf8: {e}")))?;
     let mut parts = line.splitn(2, ' ');
     let kind = parts.next().unwrap_or("").to_string();
     let route = parts.next().unwrap_or("").to_string();
@@ -393,11 +392,7 @@ impl AnyTransport {
         }
     }
 
-    pub async fn call_stream<Req, Item>(
-        &self,
-        route: &str,
-        req: &Req,
-    ) -> RpcResult<mpsc::Receiver<RpcResult<Item>>>
+    pub async fn call_stream<Req, Item>(&self, route: &str, req: &Req) -> RpcResult<mpsc::Receiver<RpcResult<Item>>>
     where
         Req: Serialize + Sync,
         Item: DeserializeOwned + Send + 'static,

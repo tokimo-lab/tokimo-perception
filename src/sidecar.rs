@@ -190,7 +190,8 @@ async fn spawn(python_dir: &PathBuf, models_dir: &str) -> Result<Running, String
 fn derive_data_local_path(models_dir: &str) -> String {
     let p = std::path::Path::new(models_dir);
     if p.ends_with("perception") || p.ends_with("ai-models") {
-        p.parent().map_or_else(|| models_dir.to_string(), |p| p.display().to_string())
+        p.parent()
+            .map_or_else(|| models_dir.to_string(), |p| p.display().to_string())
     } else {
         models_dir.to_string()
     }
@@ -224,7 +225,11 @@ fn extract_url(line: &str) -> Option<String> {
     let rest = &line[idx + "Uvicorn running on ".len()..];
     let url_end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
     let url = rest[..url_end].trim().trim_end_matches('/');
-    if url.starts_with("http") { Some(url.to_string()) } else { None }
+    if url.starts_with("http") {
+        Some(url.to_string())
+    } else {
+        None
+    }
 }
 
 async fn probe_health(url: &str) -> Result<(), String> {

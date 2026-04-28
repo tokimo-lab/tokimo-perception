@@ -249,12 +249,8 @@ impl Supervisor {
                     continue;
                 }
                 drop(st);
-                tracing::info!(
-                    "ai-worker idle for {}s, sending shutdown",
-                    idle_for.as_secs()
-                );
-                let _: RpcResult<wire::ShutdownResponse> =
-                    this.transport.call(routes::SHUTDOWN, &()).await;
+                tracing::info!("ai-worker idle for {}s, sending shutdown", idle_for.as_secs());
+                let _: RpcResult<wire::ShutdownResponse> = this.transport.call(routes::SHUTDOWN, &()).await;
                 // Reap the child.
                 st = this.state.lock().await;
                 if let Some(mut child) = st.child.take() {

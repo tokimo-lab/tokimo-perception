@@ -218,30 +218,16 @@ impl AiWorkerClient {
 
     // ---------------- CLIP ----------------
 
-    pub async fn clip_image(
-        &self,
-        image: Vec<u8>,
-        request_id: Option<String>,
-    ) -> ClientResult<Vec<f32>> {
-        self.call::<_, Vec<f32>>(
-            routes::CLIP_IMAGE,
-            &wire::ClipImageRequest { image, request_id },
-        )
-        .await
-        .map_err(rpc_to_string)
+    pub async fn clip_image(&self, image: Vec<u8>, request_id: Option<String>) -> ClientResult<Vec<f32>> {
+        self.call::<_, Vec<f32>>(routes::CLIP_IMAGE, &wire::ClipImageRequest { image, request_id })
+            .await
+            .map_err(rpc_to_string)
     }
 
-    pub async fn clip_text(
-        &self,
-        text: String,
-        request_id: Option<String>,
-    ) -> ClientResult<Vec<f32>> {
-        self.call::<_, Vec<f32>>(
-            routes::CLIP_TEXT,
-            &wire::ClipTextRequest { text, request_id },
-        )
-        .await
-        .map_err(rpc_to_string)
+    pub async fn clip_text(&self, text: String, request_id: Option<String>) -> ClientResult<Vec<f32>> {
+        self.call::<_, Vec<f32>>(routes::CLIP_TEXT, &wire::ClipTextRequest { text, request_id })
+            .await
+            .map_err(rpc_to_string)
     }
 
     pub async fn clip_classify(&self, vector: Vec<f32>) -> ClientResult<Vec<wire::TagResult>> {
@@ -257,12 +243,9 @@ impl AiWorkerClient {
         image: Vec<u8>,
         request_id: Option<String>,
     ) -> ClientResult<Vec<wire::FaceDetection>> {
-        self.call::<_, Vec<wire::FaceDetection>>(
-            routes::FACE_DETECT,
-            &wire::FaceRequest { image, request_id },
-        )
-        .await
-        .map_err(rpc_to_string)
+        self.call::<_, Vec<wire::FaceDetection>>(routes::FACE_DETECT, &wire::FaceRequest { image, request_id })
+            .await
+            .map_err(rpc_to_string)
     }
 
     // ---------------- Cancel ----------------
@@ -337,10 +320,7 @@ impl AiWorkerClient {
         self.ensure_up().await.map_err(rpc_to_string)?;
         self.mark_activity();
         self.transport
-            .call_stream::<_, wire::ProgressFrame>(
-                routes::ENSURE_CATEGORY,
-                &wire::EnsureCategoryRequest { category },
-            )
+            .call_stream::<_, wire::ProgressFrame>(routes::ENSURE_CATEGORY, &wire::EnsureCategoryRequest { category })
             .await
             .map_err(rpc_to_string)
     }
@@ -352,10 +332,7 @@ impl AiWorkerClient {
         self.ensure_up().await.map_err(rpc_to_string)?;
         self.mark_activity();
         self.transport
-            .call_stream::<_, wire::ProgressFrame>(
-                routes::DOWNLOAD_STT,
-                &wire::DownloadSttRequest { model_id },
-            )
+            .call_stream::<_, wire::ProgressFrame>(routes::DOWNLOAD_STT, &wire::DownloadSttRequest { model_id })
             .await
             .map_err(rpc_to_string)
     }
@@ -379,10 +356,7 @@ impl AiWorkerClient {
         self.ensure_up().await.map_err(rpc_to_string)?;
         self.mark_activity();
         self.transport
-            .call_stream::<_, wire::ProgressFrame>(
-                routes::MODEL_DOWNLOAD,
-                &wire::ModelActionRequest { model_id },
-            )
+            .call_stream::<_, wire::ProgressFrame>(routes::MODEL_DOWNLOAD, &wire::ModelActionRequest { model_id })
             .await
             .map_err(rpc_to_string)
     }

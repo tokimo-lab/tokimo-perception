@@ -13,9 +13,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use serde::Deserialize;
+use tokimo_perception::AiService;
 use tokimo_perception::ocr_manager::MODEL_GOT_OCR_2;
 use tokimo_perception::worker::protocol::types as wire;
-use tokimo_perception::AiService;
 
 // ---------------- Locale bundle ----------------
 
@@ -151,7 +151,11 @@ async fn build_ocr_section(ai: &Arc<AiService>, l: &LocaleBundle) -> wire::Catal
         } else {
             ai.ocr_server_models_ready()
         };
-        let name = if txt.name == cat_id { m.display_name.to_string() } else { txt.name };
+        let name = if txt.name == cat_id {
+            m.display_name.to_string()
+        } else {
+            txt.name
+        };
         models.push(wire::CatalogModel {
             id: cat_id,
             name,
@@ -167,7 +171,11 @@ async fn build_ocr_section(ai: &Arc<AiService>, l: &LocaleBundle) -> wire::Catal
                 },
             }],
             capabilities: vec![t_cap(l, "text"), t_cap(l, "blocks")],
-            provider: if is_sidecar { "python-sidecar".into() } else { "rust-native".into() },
+            provider: if is_sidecar {
+                "python-sidecar".into()
+            } else {
+                "rust-native".into()
+            },
             state: if ready {
                 wire::ModelState::Ready
             } else {
@@ -290,7 +298,11 @@ fn build_stt_section(ai: &Arc<AiService>, l: &LocaleBundle) -> wire::CatalogSect
                 };
                 wire::CatalogModel {
                     id: cat_id,
-                    name: if txt.name.starts_with("stt.") { m.name.clone() } else { txt.name },
+                    name: if txt.name.starts_with("stt.") {
+                        m.name.clone()
+                    } else {
+                        txt.name
+                    },
                     description: txt.description,
                     size_mb: None,
                     attrs: vec![wire::CatalogAttr {

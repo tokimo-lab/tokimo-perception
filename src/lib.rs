@@ -4,9 +4,9 @@
 //! Models are lazy-loaded on first use and automatically evicted after 3 minutes
 //! of inactivity to free memory.
 
+pub mod cancel;
 pub mod clip;
 pub mod clip_categories;
-pub mod cancel;
 pub mod config;
 pub mod face;
 pub mod models;
@@ -76,8 +76,7 @@ const MODEL_IDLE_TIMEOUT: Duration = Duration::from_mins(3); // 3 minutes
 /// The old deadlock risk (with `std::sync::Mutex` + blocking) is gone now that all
 /// inference uses `tokio::sync::Mutex` + `run_async`.
 fn ort_intra_op_threads() -> usize {
-    let cpus = std::thread::available_parallelism()
-        .map_or(4, std::num::NonZero::get);
+    let cpus = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
     (cpus / 2).clamp(4, 16)
 }
 
@@ -431,10 +430,7 @@ impl AiService {
         }
 
         Arc::new(Self {
-            sidecar: sidecar::SidecarManager::new(
-                python_sidecar_dir(&config),
-                config.models_dir.clone(),
-            ),
+            sidecar: sidecar::SidecarManager::new(python_sidecar_dir(&config), config.models_dir.clone()),
             config,
             ocr_manager: OnceCell::new(),
             clip: RwLock::new(None),
@@ -682,11 +678,7 @@ impl AiService {
                 ))
             })
             .await?;
-        cancel::with_cancel_id(
-            cancel_id,
-            manager.ocr_hybrid(det_model, vlm_model, image_bytes),
-        )
-        .await
+        cancel::with_cancel_id(cancel_id, manager.ocr_hybrid(det_model, vlm_model, image_bytes)).await
     }
 
     /// List available OCR models and their status.
@@ -700,11 +692,7 @@ impl AiService {
     // ── CLIP ─────────────────────────────────────────────────────────────
 
     /// Embed an image → 512-dim CLIP vector.
-    pub async fn clip_image(
-        &self,
-        image_bytes: &[u8],
-        cancel_id: Option<&str>,
-    ) -> Result<Vec<f32>, String> {
+    pub async fn clip_image(&self, image_bytes: &[u8], cancel_id: Option<&str>) -> Result<Vec<f32>, String> {
         if !self.config.enable_clip {
             return Err("CLIP is disabled".into());
         }
@@ -714,11 +702,7 @@ impl AiService {
     }
 
     /// Embed text → 512-dim CLIP vector.
-    pub async fn clip_text(
-        &self,
-        text: &str,
-        cancel_id: Option<&str>,
-    ) -> Result<Vec<f32>, String> {
+    pub async fn clip_text(&self, text: &str, cancel_id: Option<&str>) -> Result<Vec<f32>, String> {
         if !self.config.enable_clip {
             return Err("CLIP is disabled".into());
         }

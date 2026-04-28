@@ -87,10 +87,7 @@ fn ptr_eq(a: &OptRef, b: &OptRef) -> bool {
 pub fn register_current(options: &Arc<RunOptions<NoSelectedOutputs>>) -> Option<InflightGuard> {
     let id = CANCEL_ID.try_with(Clone::clone).ok().flatten()?;
     let weak = Arc::downgrade(options);
-    REGISTRY
-        .entry(id.clone())
-        .or_default()
-        .push(weak.clone());
+    REGISTRY.entry(id.clone()).or_default().push(weak.clone());
     Some(InflightGuard { id, options: weak })
 }
 

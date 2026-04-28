@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
+use tokimo_perception::AiService;
 use tokimo_perception::worker::protocol::error::RpcError;
 use tokimo_perception::worker::protocol::transport::read_header;
 use tokimo_perception::worker::protocol::{frame, types as wire};
-use tokimo_perception::AiService;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
@@ -14,7 +14,11 @@ use crate::dispatch;
 use crate::stt_stream;
 use crate::supervisor::WorkerSignal;
 
-pub async fn serve(socket_path: std::path::PathBuf, ai: Arc<AiService>, sig: mpsc::Sender<WorkerSignal>) -> std::io::Result<()> {
+pub async fn serve(
+    socket_path: std::path::PathBuf,
+    ai: Arc<AiService>,
+    sig: mpsc::Sender<WorkerSignal>,
+) -> std::io::Result<()> {
     // Remove stale socket if present.
     let _ = tokio::fs::remove_file(&socket_path).await;
     if let Some(parent) = socket_path.parent() {
@@ -87,8 +91,7 @@ async fn read_frame_raw<R: tokio::io::AsyncRead + Unpin>(r: &mut R) -> Result<Ve
 }
 
 async fn write_frame_raw<W: tokio::io::AsyncWrite + Unpin>(w: &mut W, bytes: &[u8]) -> Result<(), RpcError> {
-    let len = u32::try_from(bytes.len())
-        .map_err(|_| RpcError::BadRequest("frame too large".into()))?;
+    let len = u32::try_from(bytes.len()).map_err(|_| RpcError::BadRequest("frame too large".into()))?;
     w.write_all(&len.to_be_bytes()).await?;
     w.write_all(bytes).await?;
     w.flush().await?;

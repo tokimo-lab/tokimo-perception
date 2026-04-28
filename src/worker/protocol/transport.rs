@@ -54,13 +54,15 @@ pub trait Transport: Send + Sync + 'static {
         S: DeserializeOwned + Send + 'static;
 }
 
-// ---------------- UDS transport ----------------
+// ---------------- UDS transport (Unix-only) ----------------
 
+#[cfg(unix)]
 #[derive(Clone)]
 pub struct UdsTransport {
     socket_path: Arc<std::path::PathBuf>,
 }
 
+#[cfg(unix)]
 impl UdsTransport {
     pub fn new(socket_path: impl Into<std::path::PathBuf>) -> Self {
         Self {
@@ -76,6 +78,28 @@ impl UdsTransport {
         tokio::net::UnixStream::connect(self.socket_path.as_ref())
             .await
             .map_err(|e| RpcError::Transport(format!("uds connect {}: {e}", self.socket_path.display())))
+    }
+}
+
+/// Windows stub: UDS is not supported on this platform. Calls to any method
+/// return `RpcError::Transport`. Construction is allowed so that consumers can
+/// still compile and choose an alternate transport (HTTP) at runtime.
+#[cfg(not(unix))]
+#[derive(Clone)]
+pub struct UdsTransport {
+    socket_path: Arc<std::path::PathBuf>,
+}
+
+#[cfg(not(unix))]
+impl UdsTransport {
+    pub fn new(socket_path: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            socket_path: Arc::new(socket_path.into()),
+        }
+    }
+
+    pub fn socket_path(&self) -> &std::path::Path {
+        &self.socket_path
     }
 }
 
@@ -125,6 +149,7 @@ pub async fn read_header<R: AsyncRead + Unpin>(r: &mut R) -> RpcResult<(String, 
     Ok((kind, route))
 }
 
+#[cfg(unix)]
 #[async_trait::async_trait]
 impl Transport for UdsTransport {
     async fn call<Req, Res>(&self, route: &str, req: &Req) -> RpcResult<Res>
@@ -218,6 +243,40 @@ impl Transport for UdsTransport {
             tx: client_tx,
             rx: server_rx,
         })
+    }
+}
+
+#[cfg(not(unix))]
+#[async_trait::async_trait]
+impl Transport for UdsTransport {
+    async fn call<Req, Res>(&self, _route: &str, _req: &Req) -> RpcResult<Res>
+    where
+        Req: Serialize + Sync,
+        Res: DeserializeOwned + Send,
+    {
+        Err(RpcError::Transport(
+            "UDS transport not supported on Windows".into(),
+        ))
+    }
+
+    async fn call_stream<Req, Item>(&self, _route: &str, _req: &Req) -> RpcResult<mpsc::Receiver<RpcResult<Item>>>
+    where
+        Req: Serialize + Sync,
+        Item: DeserializeOwned + Send + 'static,
+    {
+        Err(RpcError::Transport(
+            "UDS transport not supported on Windows".into(),
+        ))
+    }
+
+    async fn open_bidi<C, S>(&self, _route: &str) -> RpcResult<BidiStream<C, S>>
+    where
+        C: Serialize + Send + Sync + 'static,
+        S: DeserializeOwned + Send + 'static,
+    {
+        Err(RpcError::Transport(
+            "UDS transport not supported on Windows".into(),
+        ))
     }
 }
 

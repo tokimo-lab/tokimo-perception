@@ -2,6 +2,7 @@
 //!
 //! Design: `SendOnlineStream` is non-Sync, so it stays inside a single driver
 //! task. A reader task forwards client frames through an mpsc channel.
+#![cfg(unix)]
 
 use std::sync::Arc;
 use std::time::Duration;

@@ -8,8 +8,10 @@ mod catalog;
 mod convert;
 mod dispatch;
 mod http;
+#[cfg(unix)]
 mod stt_stream;
 mod supervisor;
+#[cfg(unix)]
 mod uds;
 
 use std::path::PathBuf;
@@ -81,13 +83,21 @@ async fn main() -> anyhow::Result<()> {
     let (sig_tx, mut sig_rx) = mpsc::channel::<WorkerSignal>(256);
 
     if let Some(sock) = args.socket.clone() {
-        let ai = Arc::clone(&ai);
-        let tx = sig_tx.clone();
-        tokio::spawn(async move {
-            if let Err(e) = uds::serve(sock, ai, tx).await {
-                tracing::error!("UDS listener failed: {e}");
-            }
-        });
+        #[cfg(unix)]
+        {
+            let ai = Arc::clone(&ai);
+            let tx = sig_tx.clone();
+            tokio::spawn(async move {
+                if let Err(e) = uds::serve(sock, ai, tx).await {
+                    tracing::error!("UDS listener failed: {e}");
+                }
+            });
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = sock;
+            anyhow::bail!("--socket (UDS) is not supported on this platform; use --http instead");
+        }
     }
 
     if let Some(addr) = args.http.clone() {

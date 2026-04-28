@@ -252,7 +252,7 @@ fn gpu_device_present() -> bool {
 
 /// Detect NVIDIA CUDA — Linux / Windows.
 /// Returns Ok(()) if ready, Err with the first missing piece otherwise.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn detect_cuda() -> Result<(), &'static str> {
     let checks: &[(&str, &str)] = &[
         (

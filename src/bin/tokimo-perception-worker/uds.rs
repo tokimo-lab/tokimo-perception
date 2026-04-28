@@ -1,4 +1,5 @@
 //! UDS listener: accepts connections, reads header line, dispatches to handler.
+#![cfg(unix)]
 
 use std::sync::Arc;
 

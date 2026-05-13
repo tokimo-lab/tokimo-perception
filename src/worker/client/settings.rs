@@ -26,6 +26,8 @@ pub struct AiWorkerSettings {
     pub idle_timeout_secs: Option<u32>,
     /// Path to the `tokimo-perception-worker` binary (when `mode = Auto`).
     pub worker_binary: Option<String>,
+    /// Override path to the UDS socket.
+    pub socket_path: Option<String>,
     /// Directory containing AI models.
     pub models_dir: Option<String>,
 }
@@ -38,6 +40,7 @@ impl Default for AiWorkerSettings {
             keepalive_always: false,
             idle_timeout_secs: None,
             worker_binary: None,
+            socket_path: None,
             models_dir: None,
         }
     }
